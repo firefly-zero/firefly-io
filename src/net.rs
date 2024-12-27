@@ -33,8 +33,14 @@ impl<'a> Network for Actor<'a> {
 
     fn advertise(&mut self) -> NetworkResult<()> {
         let data = heapless::Vec::<u8, 64>::from_slice(b"HELLO").unwrap();
-        let waiter = self.esp_now.send(&BROADCAST_ADDRESS, &data)?;
-        waiter.wait()?;
+        let waiter = match self.esp_now.send(&BROADCAST_ADDRESS, &data) {
+            Ok(waiter) => waiter,
+            Err(err) => return Err(convert_error(err)),
+        };
+        let res = waiter.wait();
+        if let Err(err) = res {
+            return Err(convert_error(err));
+        }
         Ok(())
     }
 
@@ -44,12 +50,15 @@ impl<'a> Network for Actor<'a> {
         };
 
         if !self.esp_now.peer_exists(&packet.info.src_address) {
-            self.esp_now.add_peer(PeerInfo {
+            let res = self.esp_now.add_peer(PeerInfo {
                 peer_address: packet.info.src_address,
                 lmk: None,
                 channel: None,
                 encrypt: false,
-            })?;
+            });
+            if let Err(err) = res {
+                return Err(convert_error(err));
+            }
         }
 
         let data = packet.data();
@@ -58,8 +67,40 @@ impl<'a> Network for Actor<'a> {
     }
 
     fn send(&mut self, addr: Self::Addr, data: &[u8]) -> NetworkResult<()> {
-        let waiter = self.esp_now.send(&addr, data)?;
-        waiter.wait()?;
+        let waiter = match self.esp_now.send(&addr, data) {
+            Ok(waiter) => waiter,
+            Err(err) => return Err(convert_error(err)),
+        };
+        let res = waiter.wait();
+        if let Err(err) = res {
+            return Err(convert_error(err));
+        }
         Ok(())
+    }
+}
+
+fn convert_error(value: esp_wifi::esp_now::EspNowError) -> NetworkError {
+    use esp_wifi::esp_now::EspNowError;
+    match value {
+        EspNowError::Error(error) => match error {
+            esp_wifi::esp_now::Error::NotInitialized => NetworkError::NotInitialized,
+            esp_wifi::esp_now::Error::InvalidArgument => NetworkError::Error("invalid argument"),
+            esp_wifi::esp_now::Error::OutOfMemory => NetworkError::Error("out of memory"),
+            esp_wifi::esp_now::Error::PeerListFull => NetworkError::PeerListFull,
+            esp_wifi::esp_now::Error::NotFound => NetworkError::Error("not found"),
+            esp_wifi::esp_now::Error::InternalError => NetworkError::Error("internal error"),
+            esp_wifi::esp_now::Error::PeerExists => NetworkError::Error("peer exists"),
+            esp_wifi::esp_now::Error::InterfaceError => NetworkError::Error("interface error"),
+            esp_wifi::esp_now::Error::Other(error) => NetworkError::Other(error),
+        },
+        EspNowError::SendFailed => NetworkError::SendError,
+        EspNowError::DuplicateInstance => NetworkError::AlreadyInitialized,
+        EspNowError::Initialization(error) => match error {
+            esp_wifi::wifi::WifiError::NotInitialized => NetworkError::NotInitialized,
+            esp_wifi::wifi::WifiError::InternalError(_) => NetworkError::Error("internal error"),
+            esp_wifi::wifi::WifiError::Disconnected => NetworkError::NetThreadDeallocated,
+            esp_wifi::wifi::WifiError::UnknownWifiMode => NetworkError::Error("unknown wifi mode"),
+            esp_wifi::wifi::WifiError::Unsupported => NetworkError::Error("unsupported"),
+        },
     }
 }

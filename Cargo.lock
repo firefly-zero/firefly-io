@@ -838,7 +838,6 @@ dependencies = [
  "embedded-sdmmc",
  "esp-hal",
  "esp-println",
- "esp-wifi",
  "fugit",
  "gilrs",
  "heapless",
