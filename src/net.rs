@@ -7,19 +7,24 @@ pub struct Actor<'a> {
     esp_now: EspNow<'a>,
 }
 
+pub enum RespBuf<'a> {
+    Response(Response<'a>),
+    Incoming([u8; 6], Box<[u8]>),
+}
+
 impl<'a> Actor<'a> {
     pub fn new(esp_now: EspNow<'a>) -> Self {
         Self { esp_now }
     }
 
-    pub fn handle(&mut self, req: Request) -> Response {
+    pub fn handle(&mut self, req: Request) -> RespBuf {
         match self.handle_inner(req) {
             Ok(resp) => resp,
-            Err(_) => Response::NetError(0),
+            Err(err) => RespBuf::Response(Response::NetError(err.into())),
         }
     }
 
-    fn handle_inner(&mut self, req: Request) -> Result<Response, NetworkError> {
+    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, NetworkError> {
         let resp = match req {
             Request::NetStart => {
                 self.start()?;
@@ -37,20 +42,17 @@ impl<'a> Actor<'a> {
                 self.stop()?;
                 Response::NetAdvertised
             }
-            Request::NetRecv => {
-                // match self.recv()? {
-                //     Some((addr, msg)) => Response::NetIncoming(addr, &msg),
-                //     None => Response::NetNoIncoming,
-                // }
-                todo!()
-            }
+            Request::NetRecv => match self.recv()? {
+                Some((addr, msg)) => return Ok(RespBuf::Incoming(addr, msg)),
+                None => Response::NetNoIncoming,
+            },
             Request::NetSend(addr, data) => {
                 self.send(addr, data)?;
                 Response::NetSent
             }
             Request::ReadInput => todo!(),
         };
-        Ok(resp)
+        Ok(RespBuf::Response(resp))
     }
 }
 

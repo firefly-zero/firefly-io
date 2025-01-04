@@ -13,6 +13,7 @@ use esp_hal::{
     timer::timg::TimerGroup,
 };
 use esp_println::println;
+use firefly_hal::NetworkError;
 use firefly_net::Actor;
 use firefly_types::{spi::*, Encode};
 
@@ -73,18 +74,36 @@ fn run() -> ! {
         waiter.wait().unwrap();
         let req = Request::decode(buf).unwrap();
 
-        let resp: Response = net.handle(req);
-
-        // send response
-        let (head, tail) = send.split_at_mut(1);
-        let buf = resp.encode_buf(tail).unwrap();
-        let Ok(size) = u8::try_from(buf.len()) else {
-            todo!()
+        match net.handle(req) {
+            firefly_net::RespBuf::Response(resp) => send_resp(&mut spi, send, resp),
+            firefly_net::RespBuf::Incoming(addr, msg) => {
+                let resp = Response::NetIncoming(addr, &msg);
+                send_resp(&mut spi, send, resp);
+            }
         };
-        head[0] = size;
-        let waiter = spi.write(&head).unwrap();
-        waiter.wait().unwrap();
-        let waiter = spi.write(&buf).unwrap();
-        waiter.wait().unwrap();
     }
+}
+
+fn send_resp(
+    spi: &mut esp_hal::spi::slave::dma::SpiDma<'_, esp_hal::Blocking>,
+    send: &mut [u8; 32000],
+    resp: Response<'_>,
+) {
+    let (head, tail) = send.split_at_mut(1);
+    let buf = resp.encode_buf(tail).unwrap();
+    let Ok(size) = u8::try_from(buf.len()) else {
+        // The payload is too big.  The only Response that can, in theory, be big
+        // is NetIncoming. So we can assume that it's a message receiving error.
+        // But just in case, we want to be sure not to fall into an infinite recursion.
+        if !matches!(resp, Response::NetError(_)) {
+            let resp = Response::NetError(NetworkError::RecvError.into());
+            send_resp(spi, send, resp);
+        }
+        return;
+    };
+    head[0] = size;
+    let waiter = spi.write(&head).unwrap();
+    waiter.wait().unwrap();
+    let waiter = spi.write(&buf).unwrap();
+    waiter.wait().unwrap();
 }
