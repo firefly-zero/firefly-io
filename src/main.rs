@@ -3,21 +3,16 @@
 
 extern crate alloc;
 
-use embedded_hal::spi::SpiDevice;
-use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_backtrace as _;
 use esp_hal::{
-    delay::Delay,
     dma::{Dma, DmaPriority},
     dma_buffers,
-    gpio::{Level, Output},
     prelude::*,
     rng::Rng,
     spi::SpiMode,
     timer::timg::TimerGroup,
 };
 use esp_println::println;
-use firefly_hal::Network;
 use firefly_net::Actor;
 use firefly_types::{spi::*, Encode};
 
@@ -78,19 +73,7 @@ fn run() -> ! {
         waiter.wait().unwrap();
         let req = Request::decode(buf).unwrap();
 
-        // handle request
-        let resp: Response = match req {
-            Request::NetStart => {
-                net.start().ok().unwrap();
-                Response::NetStarted
-            }
-            Request::NetStop => todo!(),
-            Request::NetLocalAddr => todo!(),
-            Request::NetAdvertise => todo!(),
-            Request::NetRecv => todo!(),
-            Request::NetSend(_, _) => todo!(),
-            Request::ReadInput => todo!(),
-        };
+        let resp: Response = net.handle(req);
 
         // send response
         let (head, tail) = send.split_at_mut(1);

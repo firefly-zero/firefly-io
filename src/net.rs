@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
 use firefly_hal::{Network, NetworkError};
+use firefly_types::spi::*;
 
 pub struct Actor<'a> {
     esp_now: EspNow<'a>,
@@ -9,6 +10,47 @@ pub struct Actor<'a> {
 impl<'a> Actor<'a> {
     pub fn new(esp_now: EspNow<'a>) -> Self {
         Self { esp_now }
+    }
+
+    pub fn handle(&mut self, req: Request) -> Response {
+        match self.handle_inner(req) {
+            Ok(resp) => resp,
+            Err(_) => Response::NetError(0),
+        }
+    }
+
+    fn handle_inner(&mut self, req: Request) -> Result<Response, NetworkError> {
+        let resp = match req {
+            Request::NetStart => {
+                self.start()?;
+                Response::NetStarted
+            }
+            Request::NetStop => {
+                self.stop()?;
+                Response::NetStopped
+            }
+            Request::NetLocalAddr => {
+                let addr = self.local_addr();
+                Response::NetLocalAddr(addr)
+            }
+            Request::NetAdvertise => {
+                self.stop()?;
+                Response::NetAdvertised
+            }
+            Request::NetRecv => {
+                // match self.recv()? {
+                //     Some((addr, msg)) => Response::NetIncoming(addr, &msg),
+                //     None => Response::NetNoIncoming,
+                // }
+                todo!()
+            }
+            Request::NetSend(addr, data) => {
+                self.send(addr, data)?;
+                Response::NetSent
+            }
+            Request::ReadInput => todo!(),
+        };
+        Ok(resp)
     }
 }
 
