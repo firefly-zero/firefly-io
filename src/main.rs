@@ -14,7 +14,7 @@ use esp_hal::{
 };
 use esp_println::println;
 use firefly_hal::NetworkError;
-use firefly_net::*;
+use firefly_io::*;
 use firefly_types::{spi::*, Encode};
 
 #[entry]
