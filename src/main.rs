@@ -3,10 +3,13 @@
 
 extern crate alloc;
 
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_backtrace as _;
 use esp_hal::{
+    delay::Delay,
     dma::{Dma, DmaPriority},
     dma_buffers,
+    gpio::{Level, Output},
     prelude::*,
     rng::Rng,
     spi::SpiMode,
@@ -20,15 +23,12 @@ use firefly_types::{spi::*, Encode};
 #[entry]
 fn main() -> ! {
     esp_alloc::heap_allocator!(300 * 1024);
-    run();
-}
-
-fn run() -> ! {
     println!("creating device config...");
     let mut config = esp_hal::Config::default();
     config.cpu_clock = CpuClock::max();
     println!("initializing peripherals...");
     let peripherals = esp_hal::init(config);
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let inited = esp_wifi::init(
         timg0.timer0,
@@ -37,7 +37,32 @@ fn run() -> ! {
     )
     .unwrap();
     let esp_now = esp_wifi::esp_now::EspNow::new(&inited, peripherals.WIFI).unwrap();
-    let mut actor = Actor::new(esp_now);
+
+    let pad = {
+        let delay = Delay::new();
+        let sclk = peripherals.GPIO4;
+        let miso = peripherals.GPIO5;
+        let mosi = peripherals.GPIO15;
+        let cs = peripherals.GPIO7;
+
+        let cs = Output::new(cs, Level::High);
+        let spi = esp_hal::spi::master::Spi::new_with_config(
+            peripherals.SPI3,
+            esp_hal::spi::master::Config {
+                frequency: 400u32.kHz(),
+                mode: SpiMode::Mode1,
+                ..esp_hal::spi::master::Config::default()
+            },
+        )
+        .with_sck(sclk)
+        .with_mosi(mosi)
+        .with_miso(miso);
+        let spi_device = ExclusiveDevice::new(spi, cs, delay).unwrap();
+        let mode = cirque_pinnacle::Absolute::default();
+        mode.init(spi_device).unwrap()
+    };
+
+    let mut actor = Actor::new(esp_now, pad);
 
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.channel0;

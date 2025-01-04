@@ -1,9 +1,15 @@
 use alloc::boxed::Box;
+use cirque_pinnacle::{Absolute, Touchpad};
+use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::{delay::Delay, gpio::Output, spi::master::Spi, Blocking};
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
 use firefly_hal::{Network, NetworkError};
 use firefly_types::spi::*;
 
+type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
+
 pub struct Actor<'a> {
+    pad: Touchpad<PadSpi<'a>, Absolute>,
     esp_now: EspNow<'a>,
 }
 
@@ -13,8 +19,8 @@ pub enum RespBuf<'a> {
 }
 
 impl<'a> Actor<'a> {
-    pub fn new(esp_now: EspNow<'a>) -> Self {
-        Self { esp_now }
+    pub fn new(esp_now: EspNow<'a>, pad: Touchpad<PadSpi<'a>, Absolute>) -> Self {
+        Self { esp_now, pad }
     }
 
     pub fn handle(&mut self, req: Request) -> RespBuf {
@@ -50,7 +56,19 @@ impl<'a> Actor<'a> {
                 self.send(addr, data)?;
                 Response::NetSent
             }
-            Request::ReadInput => todo!(),
+            Request::ReadInput => match self.pad.read_absolute() {
+                Ok(touch) => {
+                    let pad = if touch.touched() {
+                        let x = (1000. * touch.x_f32()) as i16;
+                        let y = (1000. * touch.y_f32()) as i16;
+                        Some((x, y))
+                    } else {
+                        None
+                    };
+                    Response::Input(pad, 0)
+                }
+                Err(_) => Response::PadError,
+            },
         };
         Ok(RespBuf::Response(resp))
     }
