@@ -14,7 +14,7 @@ use esp_hal::{
 };
 use esp_println::println;
 use firefly_hal::NetworkError;
-use firefly_net::Actor;
+use firefly_net::*;
 use firefly_types::{spi::*, Encode};
 
 #[entry]
@@ -37,7 +37,7 @@ fn run() -> ! {
     )
     .unwrap();
     let esp_now = esp_wifi::esp_now::EspNow::new(&inited, peripherals.WIFI).unwrap();
-    let mut net = Actor::new(esp_now);
+    let mut actor = Actor::new(esp_now);
 
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.channel0;
@@ -74,9 +74,9 @@ fn run() -> ! {
         waiter.wait().unwrap();
         let req = Request::decode(buf).unwrap();
 
-        match net.handle(req) {
-            firefly_net::RespBuf::Response(resp) => send_resp(&mut spi, send, resp),
-            firefly_net::RespBuf::Incoming(addr, msg) => {
+        match actor.handle(req) {
+            RespBuf::Response(resp) => send_resp(&mut spi, send, resp),
+            RespBuf::Incoming(addr, msg) => {
                 let resp = Response::NetIncoming(addr, &msg);
                 send_resp(&mut spi, send, resp);
             }
