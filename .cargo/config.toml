@@ -5,12 +5,7 @@ runner = "espflash flash --monitor"
 ESP_LOG = "ERROR"
 
 [build]
-rustflags = [
-  "-C",
-  "link-arg=-nostartfiles",
-  "-C",
-  "link-args=-Wl,-Map=/home/gram/ff/firefly-supervisor/main.map",
-]
+rustflags = ["-C", "link-arg=-nostartfiles"]
 
 target = "xtensa-esp32s3-none-elf"
 
