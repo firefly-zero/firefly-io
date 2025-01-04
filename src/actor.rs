@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use cirque_pinnacle::{Absolute, Touchpad};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{delay::Delay, gpio::Output, spi::master::Spi, Blocking};
+use esp_println::println;
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
 use firefly_hal::{Network, NetworkError};
 use firefly_types::spi::*;
@@ -26,7 +27,10 @@ impl<'a> Actor<'a> {
     pub fn handle(&mut self, req: Request) -> RespBuf {
         match self.handle_inner(req) {
             Ok(resp) => resp,
-            Err(err) => RespBuf::Response(Response::NetError(err.into())),
+            Err(err) => {
+                println!("network error: {err}");
+                RespBuf::Response(Response::NetError(err.into()))
+            }
         }
     }
 
@@ -67,7 +71,11 @@ impl<'a> Actor<'a> {
                     };
                     Response::Input(pad, 0)
                 }
-                Err(_) => Response::PadError,
+                Err(err) => {
+                    let err: NetworkError = err.into();
+                    println!("touchpad error: {err}");
+                    Response::PadError
+                }
             },
         };
         Ok(RespBuf::Response(resp))

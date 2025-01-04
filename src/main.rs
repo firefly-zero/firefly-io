@@ -86,6 +86,7 @@ fn main() -> ! {
     let receive = rx_buffer;
     let send = tx_buffer;
 
+    println!("listening...");
     loop {
         // read request size
         let mut buf = &mut receive[..1];
