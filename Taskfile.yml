@@ -1,0 +1,26 @@
+# https://taskfile.dev
+version: "3"
+dotenv:
+  - ~/export-esp.sh
+tasks:
+  install-espflash:
+    status:
+      - which cargo-espflash
+    cmds:
+      - cargo install cargo-espflash
+  build:
+    cmds:
+      - cargo build --release
+  flash:
+    cmds:
+      - task: install-espflash
+      - >
+        cargo espflash flash
+        --skip-update-check
+        --chip esp32s3
+        --release
+        {{.CLI_ARGS}}
+  monitor:
+    cmds:
+      - task: install-espflash
+      - cargo espflash monitor
