@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
 use firefly_hal::{Network, NetworkError};
 
@@ -32,8 +33,8 @@ impl<'a> Network for Actor<'a> {
     }
 
     fn advertise(&mut self) -> NetworkResult<()> {
-        let data = heapless::Vec::<u8, 64>::from_slice(b"HELLO").unwrap();
-        let waiter = match self.esp_now.send(&BROADCAST_ADDRESS, &data) {
+        let data = b"HELLO";
+        let waiter = match self.esp_now.send(&BROADCAST_ADDRESS, &data[..]) {
             Ok(waiter) => waiter,
             Err(err) => return Err(convert_error(err)),
         };
@@ -44,7 +45,7 @@ impl<'a> Network for Actor<'a> {
         Ok(())
     }
 
-    fn recv(&mut self) -> NetworkResult<Option<(Self::Addr, heapless::Vec<u8, 64>)>> {
+    fn recv(&mut self) -> NetworkResult<Option<(Self::Addr, Box<[u8]>)>> {
         let Some(packet) = self.esp_now.receive() else {
             return Ok(None);
         };
@@ -62,7 +63,7 @@ impl<'a> Network for Actor<'a> {
         }
 
         let data = packet.data();
-        let data = heapless::Vec::<u8, 64>::from_slice(data).unwrap();
+        let data = data.to_vec().into_boxed_slice();
         Ok(Some((packet.info.src_address, data)))
     }
 

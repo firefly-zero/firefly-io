@@ -3,23 +3,31 @@
 
 extern crate alloc;
 
+use embedded_hal::spi::SpiDevice;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_backtrace as _;
-use esp_hal::{delay::Delay, prelude::*, rng::Rng, timer::timg::TimerGroup};
+use esp_hal::{
+    delay::Delay,
+    dma::{Dma, DmaPriority},
+    dma_buffers,
+    gpio::{Level, Output},
+    prelude::*,
+    rng::Rng,
+    spi::SpiMode,
+    timer::timg::TimerGroup,
+};
 use esp_println::println;
+use firefly_hal::Network;
 use firefly_net::Actor;
+use firefly_types::{spi::*, Encode};
 
 #[entry]
 fn main() -> ! {
     esp_alloc::heap_allocator!(300 * 1024);
     run();
-    println!("end");
-    let delay = Delay::new();
-    loop {
-        delay.delay(500.millis());
-    }
 }
 
-fn run() {
+fn run() -> ! {
     println!("creating device config...");
     let mut config = esp_hal::Config::default();
     config.cpu_clock = CpuClock::max();
@@ -33,5 +41,67 @@ fn run() {
     )
     .unwrap();
     let esp_now = esp_wifi::esp_now::EspNow::new(&inited, peripherals.WIFI).unwrap();
-    let net = Actor::new(esp_now);
+    let mut net = Actor::new(esp_now);
+
+    let dma = Dma::new(peripherals.DMA);
+    let dma_channel = dma.channel0;
+    let sclk = peripherals.GPIO0;
+    let miso = peripherals.GPIO1;
+    let mosi = peripherals.GPIO2;
+    let cs = peripherals.GPIO3;
+
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let mut spi = esp_hal::spi::slave::Spi::new(peripherals.SPI2, SpiMode::Mode0)
+        .with_sck(sclk)
+        .with_mosi(mosi)
+        .with_miso(miso)
+        .with_cs(cs)
+        .with_dma(
+            dma_channel.configure(false, DmaPriority::Priority0),
+            rx_descriptors,
+            tx_descriptors,
+        );
+
+    let receive = rx_buffer;
+    let send = tx_buffer;
+
+    loop {
+        // read request size
+        let mut buf = &mut receive[..1];
+        let waiter = spi.read(&mut buf).unwrap();
+        waiter.wait().unwrap();
+        let size = usize::from(buf[0]);
+
+        // read request payload
+        let mut buf = &mut receive[size..];
+        let waiter = spi.read(&mut buf).unwrap();
+        waiter.wait().unwrap();
+        let req = Request::decode(buf).unwrap();
+
+        // handle request
+        let resp: Response = match req {
+            Request::NetStart => {
+                net.start().ok().unwrap();
+                Response::NetStarted
+            }
+            Request::NetStop => todo!(),
+            Request::NetLocalAddr => todo!(),
+            Request::NetAdvertise => todo!(),
+            Request::NetRecv => todo!(),
+            Request::NetSend(_, _) => todo!(),
+            Request::ReadInput => todo!(),
+        };
+
+        // send response
+        let (head, tail) = send.split_at_mut(1);
+        let buf = resp.encode_buf(tail).unwrap();
+        let Ok(size) = u8::try_from(buf.len()) else {
+            todo!()
+        };
+        head[0] = size;
+        let waiter = spi.write(&head).unwrap();
+        waiter.wait().unwrap();
+        let waiter = spi.write(&buf).unwrap();
+        waiter.wait().unwrap();
+    }
 }
