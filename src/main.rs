@@ -21,7 +21,7 @@ use firefly_types::{spi::*, Encode};
 
 #[entry]
 fn main() -> ! {
-    esp_alloc::heap_allocator!(300 * 1024);
+    esp_alloc::heap_allocator!(120 * 1024);
     println!("creating device config...");
     let mut config = esp_hal::Config::default();
     config.cpu_clock = CpuClock::max();
