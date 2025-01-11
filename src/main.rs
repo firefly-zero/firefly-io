@@ -29,6 +29,7 @@ fn main() -> ! {
     println!("initializing peripherals...");
     let peripherals = esp_hal::init(config);
 
+    println!("configuring esp-now...");
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let inited = esp_wifi::init(
         timg0.timer0,
@@ -38,6 +39,7 @@ fn main() -> ! {
     .unwrap();
     let esp_now = esp_wifi::esp_now::EspNow::new(&inited, peripherals.WIFI).unwrap();
 
+    println!("configuring touch pad...");
     let pad = {
         let delay = Delay::new();
         let sclk = peripherals.GPIO4;
@@ -65,6 +67,7 @@ fn main() -> ! {
 
     let mut actor = Actor::new(esp_now, pad);
 
+    println!("configuring main SPI...");
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
     let mut spi_main = {
         let dma = Dma::new(peripherals.DMA);

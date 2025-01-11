@@ -20,3 +20,13 @@ esp-wifi = { version = "0.11.0", features = ["esp32s3", "esp-now"] }
 firefly-hal = { path = "../firefly-hal" }
 firefly-types = { version = "0.4.0", path = "../firefly-types" }
 cirque-pinnacle = "1.0.0"
+
+[profile.release]
+strip = true             # Automatically strip symbols from the binary.
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug-assertions = false
+incremental = false
+lto = "fat"
+opt-level = "z"          # Optimize for size.
+overflow-checks = false
+panic = "abort"
