@@ -1,16 +1,24 @@
 use alloc::boxed::Box;
 use cirque_pinnacle::{Absolute, Touchpad};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use esp_hal::{delay::Delay, gpio::Output, spi::master::Spi, Blocking};
+use esp_hal::{
+    delay::Delay,
+    gpio::{Input, Output},
+    spi::master::Spi,
+    Blocking,
+};
 use esp_println::println;
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 
-pub struct Actor<'a> {
-    pad: Touchpad<PadSpi<'a>, Absolute>,
-    esp_now: EspNow<'a>,
+pub struct Buttons<'a> {
+    pub s: Input<'a>,
+    pub e: Input<'a>,
+    pub w: Input<'a>,
+    pub n: Input<'a>,
+    pub menu: Input<'a>,
 }
 
 pub enum RespBuf<'a> {
@@ -18,9 +26,23 @@ pub enum RespBuf<'a> {
     Incoming([u8; 6], Box<[u8]>),
 }
 
+pub struct Actor<'a> {
+    pad: Touchpad<PadSpi<'a>, Absolute>,
+    esp_now: EspNow<'a>,
+    buttons: Buttons<'a>,
+}
+
 impl<'a> Actor<'a> {
-    pub fn new(esp_now: EspNow<'a>, pad: Touchpad<PadSpi<'a>, Absolute>) -> Self {
-        Self { esp_now, pad }
+    pub fn new(
+        esp_now: EspNow<'a>,
+        pad: Touchpad<PadSpi<'a>, Absolute>,
+        buttons: Buttons<'a>,
+    ) -> Self {
+        Self {
+            esp_now,
+            pad,
+            buttons,
+        }
     }
 
     pub fn handle(&mut self, req: Request) -> RespBuf {
@@ -59,25 +81,37 @@ impl<'a> Actor<'a> {
                 self.send(addr, data)?;
                 Response::NetSent
             }
-            Request::ReadInput => match self.pad.read_absolute() {
-                Ok(touch) => {
-                    let pad = if touch.touched() {
-                        let x = (1000. * touch.x_f32()) as i16;
-                        let y = (1000. * touch.y_f32()) as i16;
-                        Some((x, y))
-                    } else {
-                        None
-                    };
-                    Response::Input(pad, 0)
-                }
-                Err(err) => {
-                    let err: NetworkError = err.into();
-                    println!("touchpad error: {err:?}");
-                    Response::PadError
-                }
+            Request::ReadInput => match self.read_input() {
+                Some(input) => Response::Input(input.0, input.1),
+                None => Response::PadError,
             },
         };
         Ok(RespBuf::Response(resp))
+    }
+
+    fn read_input(&mut self) -> Option<(Option<(i16, i16)>, u8)> {
+        let buttons = u8::from(self.buttons.s.is_high())
+            | u8::from(self.buttons.e.is_high()) << 1
+            | u8::from(self.buttons.w.is_high()) << 2
+            | u8::from(self.buttons.n.is_high()) << 3
+            | u8::from(self.buttons.menu.is_high()) << 4;
+        match self.pad.read_absolute() {
+            Ok(touch) => {
+                let pad = if touch.touched() {
+                    let x = (1000. * touch.x_f32()) as i16;
+                    let y = (1000. * touch.y_f32()) as i16;
+                    Some((x, y))
+                } else {
+                    None
+                };
+                Some((pad, buttons))
+            }
+            Err(err) => {
+                let err: NetworkError = err.into();
+                println!("touchpad error: {err:?}");
+                None
+            }
+        }
     }
 }
 

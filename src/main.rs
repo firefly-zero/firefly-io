@@ -9,7 +9,7 @@ use esp_hal::{
     delay::Delay,
     dma::{Dma, DmaPriority},
     dma_buffers,
-    gpio::{Level, Output},
+    gpio::{Input, Level, Output},
     prelude::*,
     rng::Rng,
     spi::SpiMode,
@@ -64,7 +64,15 @@ fn main() -> ! {
         mode.init(spi_device).unwrap()
     };
 
-    let mut actor = Actor::new(esp_now, pad);
+    let buttons = Buttons {
+        s: Input::new(peripherals.GPIO9, esp_hal::gpio::Pull::Up),
+        e: Input::new(peripherals.GPIO46, esp_hal::gpio::Pull::Up),
+        w: Input::new(peripherals.GPIO11, esp_hal::gpio::Pull::Up),
+        n: Input::new(peripherals.GPIO10, esp_hal::gpio::Pull::Up),
+        menu: Input::new(peripherals.GPIO3, esp_hal::gpio::Pull::Up),
+    };
+
+    let mut actor = Actor::new(esp_now, pad, buttons);
 
     println!("configuring main SPI...");
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
