@@ -43,7 +43,8 @@ fn main() -> ! {
         let sclk = peripherals.GPIO4;
         let miso = peripherals.GPIO5;
         let mosi = peripherals.GPIO15;
-        let cs = peripherals.GPIO7;
+        let cs = peripherals.GPIO6;
+        // let dr = peripherals.GPIO7;
 
         let cs = Output::new(cs, Level::High);
         let spi = esp_hal::spi::master::Spi::new_with_config(
@@ -64,24 +65,24 @@ fn main() -> ! {
 
     let mut actor = Actor::new(esp_now, pad);
 
-    let dma = Dma::new(peripherals.DMA);
-    let dma_channel = dma.channel0;
-    let sclk = peripherals.GPIO0;
-    let miso = peripherals.GPIO1;
-    let mosi = peripherals.GPIO2;
-    let cs = peripherals.GPIO3;
-
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
-    let mut spi = esp_hal::spi::slave::Spi::new(peripherals.SPI2, SpiMode::Mode0)
-        .with_sck(sclk)
-        .with_mosi(mosi)
-        .with_miso(miso)
-        .with_cs(cs)
-        .with_dma(
-            dma_channel.configure(false, DmaPriority::Priority0),
-            rx_descriptors,
-            tx_descriptors,
-        );
+    let mut spi_main = {
+        let dma = Dma::new(peripherals.DMA);
+        let dma_channel = dma.channel0;
+        let sclk = peripherals.GPIO14;
+        let miso = peripherals.GPIO21;
+        let mosi = peripherals.GPIO45;
+
+        esp_hal::spi::slave::Spi::new(peripherals.SPI2, SpiMode::Mode0)
+            .with_sck(sclk)
+            .with_mosi(mosi)
+            .with_miso(miso)
+            .with_dma(
+                dma_channel.configure(false, DmaPriority::Priority0),
+                rx_descriptors,
+                tx_descriptors,
+            )
+    };
 
     let receive = rx_buffer;
     let send = tx_buffer;
@@ -90,21 +91,21 @@ fn main() -> ! {
     loop {
         // read request size
         let mut buf = &mut receive[..1];
-        let waiter = spi.read(&mut buf).unwrap();
+        let waiter = spi_main.read(&mut buf).unwrap();
         waiter.wait().unwrap();
         let size = usize::from(buf[0]);
 
         // read request payload
         let mut buf = &mut receive[size..];
-        let waiter = spi.read(&mut buf).unwrap();
+        let waiter = spi_main.read(&mut buf).unwrap();
         waiter.wait().unwrap();
         let req = Request::decode(buf).unwrap();
 
         match actor.handle(req) {
-            RespBuf::Response(resp) => send_resp(&mut spi, send, resp),
+            RespBuf::Response(resp) => send_resp(&mut spi_main, send, resp),
             RespBuf::Incoming(addr, msg) => {
                 let resp = Response::NetIncoming(addr, &msg);
-                send_resp(&mut spi, send, resp);
+                send_resp(&mut spi_main, send, resp);
             }
         };
     }
