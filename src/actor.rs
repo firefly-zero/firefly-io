@@ -4,7 +4,6 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{delay::Delay, gpio::Output, spi::master::Spi, Blocking};
 use esp_println::println;
 use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
-use firefly_hal::{Network, NetworkError};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
@@ -28,7 +27,7 @@ impl<'a> Actor<'a> {
         match self.handle_inner(req) {
             Ok(resp) => resp,
             Err(err) => {
-                println!("network error: {err}");
+                println!("network error: {err:?}");
                 RespBuf::Response(Response::NetError(err.into()))
             }
         }
@@ -49,7 +48,7 @@ impl<'a> Actor<'a> {
                 Response::NetLocalAddr(addr)
             }
             Request::NetAdvertise => {
-                self.stop()?;
+                self.advertise()?;
                 Response::NetAdvertised
             }
             Request::NetRecv => match self.recv()? {
@@ -73,7 +72,7 @@ impl<'a> Actor<'a> {
                 }
                 Err(err) => {
                     let err: NetworkError = err.into();
-                    println!("touchpad error: {err}");
+                    println!("touchpad error: {err:?}");
                     Response::PadError
                 }
             },
@@ -85,9 +84,7 @@ impl<'a> Actor<'a> {
 pub type Addr = [u8; 6];
 type NetworkResult<T> = Result<T, NetworkError>;
 
-impl<'a> Network for Actor<'a> {
-    type Addr = [u8; 6];
-
+impl<'a> Actor<'a> {
     fn start(&mut self) -> NetworkResult<()> {
         Ok(())
     }
@@ -96,7 +93,7 @@ impl<'a> Network for Actor<'a> {
         Ok(())
     }
 
-    fn local_addr(&self) -> Self::Addr {
+    fn local_addr(&self) -> Addr {
         let mut addr = [0u8; 6];
         esp_wifi::wifi::sta_mac(&mut addr);
         addr
@@ -115,7 +112,7 @@ impl<'a> Network for Actor<'a> {
         Ok(())
     }
 
-    fn recv(&mut self) -> NetworkResult<Option<(Self::Addr, Box<[u8]>)>> {
+    fn recv(&mut self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
         let Some(packet) = self.esp_now.receive() else {
             return Ok(None);
         };
@@ -137,7 +134,7 @@ impl<'a> Network for Actor<'a> {
         Ok(Some((packet.info.src_address, data)))
     }
 
-    fn send(&mut self, addr: Self::Addr, data: &[u8]) -> NetworkResult<()> {
+    fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
         let waiter = match self.esp_now.send(&addr, data) {
             Ok(waiter) => waiter,
             Err(err) => return Err(convert_error(err)),
@@ -147,6 +144,57 @@ impl<'a> Network for Actor<'a> {
             return Err(convert_error(err));
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum NetworkError {
+    NotInitialized,
+    AlreadyInitialized,
+    UnknownPeer,
+    CannotBind,
+    PeerListFull,
+    RecvError,
+    SendError,
+    NetThreadDeallocated,
+    OutMessageTooBig,
+    UnexpectedResp,
+    Spi(esp_hal::spi::Error),
+    Error(&'static str),
+    Other(u32),
+}
+
+impl From<embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>>
+    for NetworkError
+{
+    fn from(
+        value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>,
+    ) -> Self {
+        match value {
+            embedded_hal_bus::spi::DeviceError::Spi(err) => Self::Spi(err),
+            embedded_hal_bus::spi::DeviceError::Cs(_) => Self::Error("CS error"),
+        }
+    }
+}
+
+impl From<NetworkError> for u32 {
+    fn from(value: NetworkError) -> Self {
+        match value {
+            NetworkError::NotInitialized => 0,
+            NetworkError::AlreadyInitialized => 1,
+            NetworkError::UnknownPeer => 2,
+            NetworkError::CannotBind => 3,
+            NetworkError::PeerListFull => 4,
+            NetworkError::RecvError => 5,
+            NetworkError::SendError => 6,
+            NetworkError::NetThreadDeallocated => 7,
+            NetworkError::OutMessageTooBig => 8,
+            NetworkError::UnexpectedResp => 9,
+            #[cfg(target_os = "none")]
+            NetworkError::Spi(_) => 10,
+            NetworkError::Error(_) => 11,
+            NetworkError::Other(x) => 100 + x,
+        }
     }
 }
 
