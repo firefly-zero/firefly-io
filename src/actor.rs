@@ -8,7 +8,10 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_wifi::esp_now::{EspNow, PeerInfo, BROADCAST_ADDRESS};
+use esp_wifi::{
+    config::PowerSaveMode,
+    esp_now::{EspNow, EspNowManager, EspNowReceiver, EspNowSender, PeerInfo, BROADCAST_ADDRESS},
+};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
@@ -28,7 +31,9 @@ pub enum RespBuf<'a> {
 
 pub struct Actor<'a> {
     pad: Touchpad<PadSpi<'a>, Absolute>,
-    esp_now: EspNow<'a>,
+    manager: EspNowManager<'a>,
+    sender: EspNowSender<'a>,
+    receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
 }
 
@@ -38,8 +43,13 @@ impl<'a> Actor<'a> {
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
     ) -> Self {
+        let (manager, sender, receiver) = esp_now.split();
+        // begin with networking disabled
+        manager.set_power_saving(PowerSaveMode::Maximum).unwrap();
         Self {
-            esp_now,
+            manager,
+            sender,
+            receiver,
             pad,
             buttons,
         }
@@ -120,10 +130,14 @@ type NetworkResult<T> = Result<T, NetworkError>;
 
 impl<'a> Actor<'a> {
     fn start(&mut self) -> NetworkResult<()> {
+        self.manager.set_power_saving(PowerSaveMode::None).unwrap();
         Ok(())
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
+        self.manager
+            .set_power_saving(PowerSaveMode::Maximum)
+            .unwrap();
         Ok(())
     }
 
@@ -135,7 +149,7 @@ impl<'a> Actor<'a> {
 
     fn advertise(&mut self) -> NetworkResult<()> {
         let data = b"HELLO";
-        let waiter = match self.esp_now.send(&BROADCAST_ADDRESS, &data[..]) {
+        let waiter = match self.sender.send(&BROADCAST_ADDRESS, &data[..]) {
             Ok(waiter) => waiter,
             Err(err) => return Err(convert_error(err)),
         };
@@ -147,12 +161,12 @@ impl<'a> Actor<'a> {
     }
 
     fn recv(&mut self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
-        let Some(packet) = self.esp_now.receive() else {
+        let Some(packet) = self.receiver.receive() else {
             return Ok(None);
         };
 
-        if !self.esp_now.peer_exists(&packet.info.src_address) {
-            let res = self.esp_now.add_peer(PeerInfo {
+        if !self.manager.peer_exists(&packet.info.src_address) {
+            let res = self.manager.add_peer(PeerInfo {
                 peer_address: packet.info.src_address,
                 lmk: None,
                 channel: None,
@@ -169,7 +183,7 @@ impl<'a> Actor<'a> {
     }
 
     fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
-        let waiter = match self.esp_now.send(&addr, data) {
+        let waiter = match self.sender.send(&addr, data) {
             Ok(waiter) => waiter,
             Err(err) => return Err(convert_error(err)),
         };
