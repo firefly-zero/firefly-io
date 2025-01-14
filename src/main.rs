@@ -7,13 +7,13 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_backtrace as _;
 use esp_hal::{
     delay::Delay,
-    dma::{Dma, DmaPriority},
-    dma_buffers,
     gpio::{Input, Level, Output},
     prelude::*,
     rng::Rng,
     spi::SpiMode,
     timer::timg::TimerGroup,
+    uart::Uart,
+    Blocking,
 };
 use esp_println::println;
 use firefly_io::*;
@@ -75,58 +75,36 @@ fn main() -> ! {
     let mut actor = Actor::new(esp_now, pad, buttons);
 
     println!("configuring main SPI...");
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
-    let mut spi_main = {
-        let dma = Dma::new(peripherals.DMA);
-        let dma_channel = dma.channel0;
-        let sclk = peripherals.GPIO14;
+    let mut uart_main = {
         let miso = peripherals.GPIO21;
         let mosi = peripherals.GPIO45;
-
-        esp_hal::spi::slave::Spi::new(peripherals.SPI2, SpiMode::Mode0)
-            .with_sck(sclk)
-            .with_mosi(mosi)
-            .with_miso(miso)
-            .with_dma(
-                dma_channel.configure(false, DmaPriority::Priority0),
-                rx_descriptors,
-                tx_descriptors,
-            )
+        Uart::new(peripherals.UART1, miso, mosi).unwrap()
     };
 
-    let receive = rx_buffer;
-    let send = tx_buffer;
-
     println!("listening...");
+    let buf = &mut [0u8; 300];
     loop {
         // read request size
-        let mut buf = &mut receive[..1];
-        let waiter = spi_main.read(&mut buf).unwrap();
-        waiter.wait().unwrap();
+        uart_main.read_bytes(&mut buf[..1]).unwrap();
         let size = usize::from(buf[0]);
+        println!("reading {size} bytes...");
 
         // read request payload
-        let mut buf = &mut receive[size..];
-        let waiter = spi_main.read(&mut buf).unwrap();
-        waiter.wait().unwrap();
-        let req = Request::decode(buf).unwrap();
+        uart_main.read_bytes(&mut buf[..size]).unwrap();
+        let req = Request::decode(&buf[..size]).unwrap();
 
         match actor.handle(req) {
-            RespBuf::Response(resp) => send_resp(&mut spi_main, send, resp),
+            RespBuf::Response(resp) => send_resp(&mut uart_main, buf, resp),
             RespBuf::Incoming(addr, msg) => {
                 let resp = Response::NetIncoming(addr, &msg);
-                send_resp(&mut spi_main, send, resp);
+                send_resp(&mut uart_main, buf, resp);
             }
         };
     }
 }
 
-fn send_resp(
-    spi: &mut esp_hal::spi::slave::dma::SpiDma<'_, esp_hal::Blocking>,
-    send: &mut [u8; 32000],
-    resp: Response<'_>,
-) {
-    let (head, tail) = send.split_at_mut(1);
+fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) {
+    let (head, tail) = buf.split_at_mut(1);
     let buf = resp.encode_buf(tail).unwrap();
     let Ok(size) = u8::try_from(buf.len()) else {
         // The payload is too big.  The only Response that can, in theory, be big
@@ -134,13 +112,12 @@ fn send_resp(
         // But just in case, we want to be sure not to fall into an infinite recursion.
         if !matches!(resp, Response::NetError(_)) {
             let resp = Response::NetError(NetworkError::RecvError.into());
-            send_resp(spi, send, resp);
+            send_resp(uart, buf, resp);
         }
         return;
     };
+    println!("sending {size} bytes...");
     head[0] = size;
-    let waiter = spi.write(&head).unwrap();
-    waiter.wait().unwrap();
-    let waiter = spi.write(&buf).unwrap();
-    waiter.wait().unwrap();
+    uart.write_bytes(head).unwrap();
+    uart.write_bytes(buf).unwrap();
 }
