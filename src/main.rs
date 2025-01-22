@@ -110,8 +110,8 @@ fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) 
         // The payload is too big.  The only Response that can, in theory, be big
         // is NetIncoming. So we can assume that it's a message receiving error.
         // But just in case, we want to be sure not to fall into an infinite recursion.
-        if !matches!(resp, Response::NetError(_)) {
-            let resp = Response::NetError(NetworkError::RecvError.into());
+        if !matches!(resp, Response::Error(_)) {
+            let resp = Response::Error("response is too big");
             send_resp(uart, buf, resp);
         }
         return;

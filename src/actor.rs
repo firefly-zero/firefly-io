@@ -8,13 +8,11 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_wifi::{
-    config::PowerSaveMode,
-    esp_now::{EspNow, EspNowManager, EspNowReceiver, EspNowSender, PeerInfo, BROADCAST_ADDRESS},
-};
+use esp_wifi::{config::PowerSaveMode, esp_now::*};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
+type RawInput = (Option<(i16, i16)>, u8);
 
 pub struct Buttons<'a> {
     pub s: Input<'a>,
@@ -59,13 +57,13 @@ impl<'a> Actor<'a> {
         match self.handle_inner(req) {
             Ok(resp) => resp,
             Err(err) => {
-                println!("network error: {err:?}");
-                RespBuf::Response(Response::NetError(err.into()))
+                println!("error: {err:?}");
+                RespBuf::Response(Response::Error(err))
             }
         }
     }
 
-    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, NetworkError> {
+    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, &'static str> {
         let resp = match req {
             Request::NetStart => {
                 self.start()?;
@@ -91,15 +89,15 @@ impl<'a> Actor<'a> {
                 self.send(addr, data)?;
                 Response::NetSent
             }
-            Request::ReadInput => match self.read_input() {
-                Some(input) => Response::Input(input.0, input.1),
-                None => Response::PadError,
-            },
+            Request::ReadInput => {
+                let input = self.read_input()?;
+                Response::Input(input.0, input.1)
+            }
         };
         Ok(RespBuf::Response(resp))
     }
 
-    fn read_input(&mut self) -> Option<(Option<(i16, i16)>, u8)> {
+    fn read_input(&mut self) -> Result<RawInput, &'static str> {
         let buttons = u8::from(self.buttons.s.is_high())
             | u8::from(self.buttons.e.is_high()) << 1
             | u8::from(self.buttons.w.is_high()) << 2
@@ -114,19 +112,15 @@ impl<'a> Actor<'a> {
                 } else {
                     None
                 };
-                Some((pad, buttons))
+                Ok((pad, buttons))
             }
-            Err(err) => {
-                let err: NetworkError = err.into();
-                println!("touchpad error: {err:?}");
-                None
-            }
+            Err(err) => Err(convert_error2(err)),
         }
     }
 }
 
 pub type Addr = [u8; 6];
-type NetworkResult<T> = Result<T, NetworkError>;
+type NetworkResult<T> = Result<T, &'static str>;
 
 impl<'a> Actor<'a> {
     fn start(&mut self) -> NetworkResult<()> {
@@ -195,79 +189,61 @@ impl<'a> Actor<'a> {
     }
 }
 
-#[derive(Debug)]
-pub enum NetworkError {
-    NotInitialized,
-    AlreadyInitialized,
-    UnknownPeer,
-    CannotBind,
-    PeerListFull,
-    RecvError,
-    SendError,
-    NetThreadDeallocated,
-    OutMessageTooBig,
-    UnexpectedResp,
-    Spi(esp_hal::spi::Error),
-    Error(&'static str),
-    Other(u32),
-}
-
-impl From<embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>>
-    for NetworkError
-{
-    fn from(
-        value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>,
-    ) -> Self {
-        match value {
-            embedded_hal_bus::spi::DeviceError::Spi(err) => Self::Spi(err),
-            embedded_hal_bus::spi::DeviceError::Cs(_) => Self::Error("CS error"),
-        }
-    }
-}
-
-impl From<NetworkError> for u32 {
-    fn from(value: NetworkError) -> Self {
-        match value {
-            NetworkError::NotInitialized => 0,
-            NetworkError::AlreadyInitialized => 1,
-            NetworkError::UnknownPeer => 2,
-            NetworkError::CannotBind => 3,
-            NetworkError::PeerListFull => 4,
-            NetworkError::RecvError => 5,
-            NetworkError::SendError => 6,
-            NetworkError::NetThreadDeallocated => 7,
-            NetworkError::OutMessageTooBig => 8,
-            NetworkError::UnexpectedResp => 9,
-            #[cfg(target_os = "none")]
-            NetworkError::Spi(_) => 10,
-            NetworkError::Error(_) => 11,
-            NetworkError::Other(x) => 100 + x,
-        }
-    }
-}
-
-fn convert_error(value: esp_wifi::esp_now::EspNowError) -> NetworkError {
+fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
     use esp_wifi::esp_now::EspNowError;
     match value {
         EspNowError::Error(error) => match error {
-            esp_wifi::esp_now::Error::NotInitialized => NetworkError::NotInitialized,
-            esp_wifi::esp_now::Error::InvalidArgument => NetworkError::Error("invalid argument"),
-            esp_wifi::esp_now::Error::OutOfMemory => NetworkError::Error("out of memory"),
-            esp_wifi::esp_now::Error::PeerListFull => NetworkError::PeerListFull,
-            esp_wifi::esp_now::Error::NotFound => NetworkError::Error("not found"),
-            esp_wifi::esp_now::Error::InternalError => NetworkError::Error("internal error"),
-            esp_wifi::esp_now::Error::PeerExists => NetworkError::Error("peer exists"),
-            esp_wifi::esp_now::Error::InterfaceError => NetworkError::Error("interface error"),
-            esp_wifi::esp_now::Error::Other(error) => NetworkError::Other(error),
+            esp_wifi::esp_now::Error::NotInitialized => "esp-now: not initialized",
+            esp_wifi::esp_now::Error::InvalidArgument => "esp-now: invalid argument",
+            esp_wifi::esp_now::Error::OutOfMemory => {
+                "esp-now: insufficient memory to complete the operation"
+            }
+            esp_wifi::esp_now::Error::PeerListFull => "esp-now: peer list is full",
+            esp_wifi::esp_now::Error::NotFound => "esp-now: peer is not found",
+            esp_wifi::esp_now::Error::InternalError => "esp-now: internal error",
+            esp_wifi::esp_now::Error::PeerExists => "esp-now: peer already exists",
+            esp_wifi::esp_now::Error::InterfaceError => "esp-now: interface error",
+            esp_wifi::esp_now::Error::Other(_) => "esp-now: unknown error",
         },
-        EspNowError::SendFailed => NetworkError::SendError,
-        EspNowError::DuplicateInstance => NetworkError::AlreadyInitialized,
+        EspNowError::SendFailed => "esp-now: failed to send message",
+        EspNowError::DuplicateInstance => "esp-now: duplicate instance",
         EspNowError::Initialization(error) => match error {
-            esp_wifi::wifi::WifiError::NotInitialized => NetworkError::NotInitialized,
-            esp_wifi::wifi::WifiError::InternalError(_) => NetworkError::Error("internal error"),
-            esp_wifi::wifi::WifiError::Disconnected => NetworkError::NetThreadDeallocated,
-            esp_wifi::wifi::WifiError::UnknownWifiMode => NetworkError::Error("unknown wifi mode"),
-            esp_wifi::wifi::WifiError::Unsupported => NetworkError::Error("unsupported"),
+            esp_wifi::wifi::WifiError::NotInitialized => "wifi init: not initialized",
+            esp_wifi::wifi::WifiError::InternalError(_) => "wifi init: internal error",
+            esp_wifi::wifi::WifiError::Disconnected => "wifi init: disconnected",
+            esp_wifi::wifi::WifiError::UnknownWifiMode => "wifi init: unknown WiFi mode",
+            esp_wifi::wifi::WifiError::Unsupported => "wifi init: unsupported",
         },
+    }
+}
+
+fn convert_error2(
+    value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>,
+) -> &'static str {
+    use esp_hal::dma::DmaError;
+    match value {
+        embedded_hal_bus::spi::DeviceError::Spi(err) => match err {
+            esp_hal::spi::Error::DmaError(err) => match err {
+                DmaError::InvalidAlignment => "spi: dma: alignment of data is invalid",
+                DmaError::OutOfDescriptors => "spi: dma: more descriptors are needed for the buffer size",
+                DmaError::DescriptorError => "spi: dma: DMA rejected the descriptor configuration",
+                DmaError::Overflow => "spi: dma: available free buffer is less than the amount of data to push",
+                DmaError::BufferTooSmall => "spi: dma: the given buffer is too small",
+                DmaError::UnsupportedMemoryRegion => "spi: dma: descriptors or buffers are not located in a supported memory region",
+                DmaError::InvalidChunkSize => "spi: dma: invalid DMA chunk size",
+                DmaError::Late => "spi: dma: writing to or reading from a circular DMA transaction is done too late",
+            },
+            esp_hal::spi::Error::MaxDmaTransferSizeExceeded => {
+                "the maximum DMA transfer size was exceeded"
+            }
+            esp_hal::spi::Error::FifoSizeExeeded => {
+                "the FIFO size was exceeded during SPI communication"
+            }
+            esp_hal::spi::Error::Unsupported => "spi: the operation is unsupported",
+            esp_hal::spi::Error::Unknown => {
+                "spi: an unknown error occurred during SPI communication"
+            }
+        },
+        embedded_hal_bus::spi::DeviceError::Cs(_) => "spi: asserting or deasserting CS failed",
     }
 }
