@@ -6,11 +6,12 @@ extern crate alloc;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_backtrace as _;
 use esp_hal::{
+    clock::CpuClock,
     delay::Delay,
     gpio::{Input, Level, Output},
-    prelude::*,
+    main,
     rng::Rng,
-    spi::SpiMode,
+    time::RateExtU32,
     timer::timg::TimerGroup,
     uart::Uart,
     Blocking,
@@ -19,7 +20,7 @@ use esp_println::println;
 use firefly_io::*;
 use firefly_types::{spi::*, Encode};
 
-#[entry]
+#[main]
 fn main() -> ! {
     esp_alloc::heap_allocator!(120 * 1024);
     println!("creating device config...");
@@ -48,17 +49,14 @@ fn main() -> ! {
         // let dr = peripherals.GPIO7;
 
         let cs = Output::new(cs, Level::High);
-        let spi = esp_hal::spi::master::Spi::new_with_config(
-            peripherals.SPI3,
-            esp_hal::spi::master::Config {
-                frequency: 400u32.kHz(),
-                mode: SpiMode::Mode1,
-                ..esp_hal::spi::master::Config::default()
-            },
-        )
-        .with_sck(sclk)
-        .with_mosi(mosi)
-        .with_miso(miso);
+        let mut config = esp_hal::spi::master::Config::default();
+        config.frequency = 400u32.kHz();
+        config.mode = esp_hal::spi::Mode::_1;
+        let spi = esp_hal::spi::master::Spi::new(peripherals.SPI3, config)
+            .unwrap()
+            .with_sck(sclk)
+            .with_mosi(mosi)
+            .with_miso(miso);
         let spi_device = ExclusiveDevice::new(spi, cs, delay).unwrap();
         let mode = cirque_pinnacle::Absolute::default();
         mode.init(spi_device).unwrap()
@@ -78,7 +76,11 @@ fn main() -> ! {
     let mut uart_main = {
         let miso = peripherals.GPIO21;
         let mosi = peripherals.GPIO45;
-        Uart::new(peripherals.UART1, miso, mosi).unwrap()
+        let config = esp_hal::uart::Config::default();
+        Uart::new(peripherals.UART1, config)
+            .unwrap()
+            .with_rx(miso)
+            .with_tx(mosi)
     };
 
     println!("listening...");

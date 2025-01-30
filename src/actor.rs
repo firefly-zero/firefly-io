@@ -122,7 +122,7 @@ impl<'a> Actor<'a> {
 pub type Addr = [u8; 6];
 type NetworkResult<T> = Result<T, &'static str>;
 
-impl<'a> Actor<'a> {
+impl Actor<'_> {
     fn start(&mut self) -> NetworkResult<()> {
         self.manager.set_power_saving(PowerSaveMode::None).unwrap();
         Ok(())
@@ -224,14 +224,14 @@ fn convert_error2(
     match value {
         embedded_hal_bus::spi::DeviceError::Spi(err) => match err {
             esp_hal::spi::Error::DmaError(err) => match err {
-                DmaError::InvalidAlignment => "spi: dma: alignment of data is invalid",
-                DmaError::OutOfDescriptors => "spi: dma: more descriptors are needed for the buffer size",
-                DmaError::DescriptorError => "spi: dma: DMA rejected the descriptor configuration",
-                DmaError::Overflow => "spi: dma: available free buffer is less than the amount of data to push",
-                DmaError::BufferTooSmall => "spi: dma: the given buffer is too small",
-                DmaError::UnsupportedMemoryRegion => "spi: dma: descriptors or buffers are not located in a supported memory region",
-                DmaError::InvalidChunkSize => "spi: dma: invalid DMA chunk size",
-                DmaError::Late => "spi: dma: writing to or reading from a circular DMA transaction is done too late",
+                DmaError::InvalidAlignment(_) => "spi: dmi: invalid alignment",
+                DmaError::OutOfDescriptors => "spi: dmi: out of descriptors",
+                DmaError::DescriptorError => "spi: dmi: descriptor error",
+                DmaError::Overflow => "spi: dmi: overflow",
+                DmaError::BufferTooSmall => "spi: dmi: buffer too small",
+                DmaError::UnsupportedMemoryRegion => "spi: dmi: unsupported_memory_region",
+                DmaError::InvalidChunkSize => "spi: dmi: invalid chunk size",
+                DmaError::Late => "spi: dmi: late",
             },
             esp_hal::spi::Error::MaxDmaTransferSizeExceeded => {
                 "the maximum DMA transfer size was exceeded"
@@ -243,6 +243,7 @@ fn convert_error2(
             esp_hal::spi::Error::Unknown => {
                 "spi: an unknown error occurred during SPI communication"
             }
+            _ => "spi: unknown error",
         },
         embedded_hal_bus::spi::DeviceError::Cs(_) => "spi: asserting or deasserting CS failed",
     }
