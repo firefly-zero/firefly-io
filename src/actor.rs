@@ -43,7 +43,7 @@ impl<'a> Actor<'a> {
     ) -> Self {
         let (manager, sender, receiver) = esp_now.split();
         // begin with networking disabled
-        manager.set_power_saving(PowerSaveMode::Maximum).unwrap();
+        _ = manager.set_power_saving(PowerSaveMode::Maximum);
         Self {
             manager,
             sender,
@@ -124,14 +124,27 @@ type NetworkResult<T> = Result<T, &'static str>;
 
 impl Actor<'_> {
     fn start(&mut self) -> NetworkResult<()> {
-        self.manager.set_power_saving(PowerSaveMode::None).unwrap();
+        let res = self.manager.set_power_saving(PowerSaveMode::None);
+        if res.is_err() {
+            return Err("failed to exit power saving mode");
+        }
         Ok(())
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
-        self.manager
-            .set_power_saving(PowerSaveMode::Maximum)
-            .unwrap();
+        let res = self.manager.set_power_saving(PowerSaveMode::Maximum);
+        if res.is_err() {
+            return Err("failed to enter power saving mode");
+        }
+        loop {
+            let Ok(peer) = self.manager.fetch_peer(true) else {
+                break;
+            };
+            let res = self.manager.remove_peer(&peer.peer_address);
+            if res.is_err() {
+                return Err("peer not found, cannot remove");
+            }
+        }
         Ok(())
     }
 
