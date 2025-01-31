@@ -190,14 +190,15 @@ impl Actor<'_> {
     }
 
     fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
-        let waiter = match self.sender.send(&addr, data) {
-            Ok(waiter) => waiter,
-            Err(err) => return Err(convert_error(err)),
-        };
-        let res = waiter.wait();
+        let res = self.sender.send(&addr, data);
         if let Err(err) = res {
             return Err(convert_error(err));
-        }
+        };
+        // TODO: figure out retrieving errors from waiter later.
+        // let res = waiter.wait();
+        // if let Err(err) = res {
+        //     return Err(convert_error(err));
+        // }
         Ok(())
     }
 }
