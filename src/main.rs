@@ -89,7 +89,6 @@ fn main() -> ! {
         // read request size
         uart_main.read_bytes(&mut buf[..1]).unwrap();
         let size = usize::from(buf[0]);
-        println!("reading {size} bytes...");
 
         // read request payload
         uart_main.read_bytes(&mut buf[..size]).unwrap();
@@ -118,7 +117,6 @@ fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) 
         }
         return;
     };
-    println!("sending {size} bytes...");
     head[0] = size;
     uart.write_bytes(head).unwrap();
     uart.write_bytes(buf).unwrap();
