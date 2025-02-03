@@ -42,15 +42,15 @@ impl<'a> Actor<'a> {
         buttons: Buttons<'a>,
     ) -> Self {
         let (manager, sender, receiver) = esp_now.split();
-        // begin with networking disabled
-        _ = manager.set_power_saving(PowerSaveMode::Maximum);
-        Self {
+        let mut actor = Self {
             manager,
             sender,
             receiver,
             pad,
             buttons,
-        }
+        };
+        _ = actor.stop();
+        actor
     }
 
     pub fn handle(&mut self, req: Request) -> RespBuf {
