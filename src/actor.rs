@@ -172,7 +172,8 @@ impl Actor<'_> {
             return Ok(None);
         };
 
-        if !self.manager.peer_exists(&packet.info.src_address) {
+        let known_peer = self.manager.peer_exists(&packet.info.src_address);
+        if !known_peer && packet.data() == b"HELLO" {
             let res = self.manager.add_peer(PeerInfo {
                 peer_address: packet.info.src_address,
                 lmk: None,
