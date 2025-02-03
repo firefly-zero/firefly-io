@@ -156,14 +156,14 @@ impl Actor<'_> {
 
     fn advertise(&mut self) -> NetworkResult<()> {
         let data = b"HELLO";
-        let waiter = match self.sender.send(&BROADCAST_ADDRESS, &data[..]) {
-            Ok(waiter) => waiter,
-            Err(err) => return Err(convert_error(err)),
-        };
-        let res = waiter.wait();
+        let res = self.sender.send(&BROADCAST_ADDRESS, &data[..]);
         if let Err(err) = res {
             return Err(convert_error(err));
-        }
+        };
+        // let res = waiter.wait();
+        // if let Err(err) = res {
+        //     return Err(convert_error(err));
+        // }
         Ok(())
     }
 
