@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 critical-section = "1.2.0"
-esp-backtrace = { version = "0.15.0", features = [
+esp-backtrace = { version = "0.16.0", features = [
     "esp32s3",
     "exception-handler",
     "panic-handler",
@@ -13,10 +13,10 @@ esp-backtrace = { version = "0.15.0", features = [
 ] }
 embedded-hal = { version = "1.0.0" }
 embedded-hal-bus = "0.3.0"
-esp-alloc = { version = "0.6.0" }
-esp-hal = { version = "0.23.1", features = ["esp32s3"] }
-esp-println = { version = "0.13.0", features = ["esp32s3"] }
-esp-wifi = { version = "0.12.0", features = ["esp32s3", "esp-now"] }
+esp-alloc = { version = "0.8.0" }
+esp-hal = { version = "1.0.0-beta.1", features = ["esp32s3", "unstable"] }
+esp-println = { version = "0.14.0", features = ["esp32s3"] }
+esp-wifi = { version = "0.14.1", features = ["esp32s3", "esp-now"] }
 firefly-types = { version = "0.5.0", path = "../firefly-types" }
 cirque-pinnacle = "1.0.0"
 

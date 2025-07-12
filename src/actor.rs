@@ -8,7 +8,7 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_wifi::{config::PowerSaveMode, esp_now::*};
+use esp_wifi::{config::PowerSaveMode, esp_now::*, wifi::WifiController};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
@@ -29,6 +29,7 @@ pub enum RespBuf<'a> {
 
 pub struct Actor<'a> {
     pad: Touchpad<PadSpi<'a>, Absolute>,
+    wifi: WifiController<'a>,
     manager: EspNowManager<'a>,
     sender: EspNowSender<'a>,
     receiver: EspNowReceiver<'a>,
@@ -37,12 +38,14 @@ pub struct Actor<'a> {
 
 impl<'a> Actor<'a> {
     pub fn new(
+        wifi: WifiController<'a>,
         esp_now: EspNow<'a>,
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
     ) -> Self {
         let (manager, sender, receiver) = esp_now.split();
         let mut actor = Self {
+            wifi,
             manager,
             sender,
             receiver,
@@ -124,7 +127,7 @@ type NetworkResult<T> = Result<T, &'static str>;
 
 impl Actor<'_> {
     fn start(&mut self) -> NetworkResult<()> {
-        let res = self.manager.set_power_saving(PowerSaveMode::None);
+        let res = self.wifi.set_power_saving(PowerSaveMode::None);
         if res.is_err() {
             return Err("failed to exit power saving mode");
         }
@@ -132,7 +135,7 @@ impl Actor<'_> {
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
-        let res = self.manager.set_power_saving(PowerSaveMode::Maximum);
+        let res = self.wifi.set_power_saving(PowerSaveMode::Maximum);
         if res.is_err() {
             return Err("failed to enter power saving mode");
         }
@@ -179,6 +182,7 @@ impl Actor<'_> {
                 lmk: None,
                 channel: None,
                 encrypt: false,
+                interface: EspNowWifiInterface::Sta,
             });
             if let Err(err) = res {
                 return Err(convert_error(err));
@@ -228,6 +232,7 @@ fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
             esp_wifi::wifi::WifiError::Disconnected => "wifi init: disconnected",
             esp_wifi::wifi::WifiError::UnknownWifiMode => "wifi init: unknown WiFi mode",
             esp_wifi::wifi::WifiError::Unsupported => "wifi init: unsupported",
+            _ => "wifi init: unknown error",
         },
     }
 }
