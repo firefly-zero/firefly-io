@@ -131,13 +131,17 @@ impl Actor<'_> {
         if res.is_err() {
             return Err("failed to exit power saving mode");
         }
+        let res = self.wifi.start();
+        if res.is_err() {
+            return Err("failed to start wifi");
+        }
         Ok(())
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
-        let res = self.wifi.set_power_saving(PowerSaveMode::Maximum);
+        let res = self.wifi.stop();
         if res.is_err() {
-            return Err("failed to enter power saving mode");
+            return Err("failed to stop wifi");
         }
         loop {
             let Ok(peer) = self.manager.fetch_peer(true) else {

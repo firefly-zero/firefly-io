@@ -4,6 +4,7 @@
 extern crate alloc;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
+use embedded_io::Read;
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
@@ -36,7 +37,8 @@ fn main() -> ! {
         peripherals.RADIO_CLK,
     )
     .unwrap();
-    let (wifi, interfaces) = esp_wifi::wifi::new(&inited, peripherals.WIFI).unwrap();
+    let (mut wifi, interfaces) = esp_wifi::wifi::new(&inited, peripherals.WIFI).unwrap();
+    wifi.set_mode(esp_wifi::wifi::WifiMode::Sta).unwrap();
     let esp_now = interfaces.esp_now;
 
     println!("configuring touch pad...");
@@ -92,7 +94,7 @@ fn main() -> ! {
         let size = usize::from(buf[0]);
 
         // read request payload
-        uart_main.read(&mut buf[..size]).unwrap();
+        uart_main.read_exact(&mut buf[..size]).unwrap();
         let req = Request::decode(&buf[..size]).unwrap();
 
         match actor.handle(req) {
