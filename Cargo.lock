@@ -599,6 +599,7 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "esp-wifi",
+ "esp-wifi-sys",
  "firefly-types",
 ]
 

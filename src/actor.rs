@@ -33,7 +33,6 @@ pub struct Actor<'a> {
     pad: Touchpad<PadSpi<'a>, Absolute>,
     wifi: WifiController<'a>,
     manager: EspNowManager<'a>,
-    sender: EspNowSender<'a>,
     receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
 }
@@ -45,11 +44,10 @@ impl<'a> Actor<'a> {
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
     ) -> Self {
-        let (manager, sender, receiver) = esp_now.split();
+        let (manager, _sender, receiver) = esp_now.split();
         let mut actor = Self {
             wifi,
             manager,
-            sender,
             receiver,
             pad,
             buttons,
@@ -164,16 +162,7 @@ impl Actor<'_> {
     }
 
     fn advertise(&mut self) -> NetworkResult<()> {
-        let data = b"HELLO";
-        let res = self.sender.send(&BROADCAST_ADDRESS, &data[..]);
-        if let Err(err) = res {
-            return Err(convert_error(err));
-        };
-        // let res = waiter.wait();
-        // if let Err(err) = res {
-        //     return Err(convert_error(err));
-        // }
-        Ok(())
+        self.send(BROADCAST_ADDRESS, b"HELLO")
     }
 
     fn recv(&mut self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
@@ -201,15 +190,17 @@ impl Actor<'_> {
     }
 
     fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
-        let res = self.sender.send(&addr, data);
-        if let Err(err) = res {
+        // Using EspNowSender.send is slow because it registers a callback
+        // and returns SendWaiter which forcefully awaits for delivery confirmation
+        // in the destructor. It's possible to bypass destructor with core::mem::forget
+        // but the callback registration willbe done anyway.
+        // So, we use esp-wifi-sys directly.
+        use esp_wifi_sys::include::esp_now_send;
+        let code = unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
+        if code != 0 {
+            let err = EspNowError::Error(Error::from_code(code as u32));
             return Err(convert_error(err));
-        };
-        // TODO: figure out retrieving errors from waiter later.
-        // let res = waiter.wait();
-        // if let Err(err) = res {
-        //     return Err(convert_error(err));
-        // }
+        }
         Ok(())
     }
 }
