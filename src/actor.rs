@@ -1,3 +1,5 @@
+use core::convert::Infallible;
+
 use alloc::boxed::Box;
 use cirque_pinnacle::{Absolute, Touchpad};
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -212,7 +214,7 @@ impl Actor<'_> {
     }
 }
 
-fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
+const fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
     use esp_wifi::esp_now::EspNowError;
     match value {
         EspNowError::Error(error) => match error {
@@ -241,8 +243,8 @@ fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
     }
 }
 
-fn convert_error2(
-    value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>,
+const fn convert_error2(
+    value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, Infallible>,
 ) -> &'static str {
     use esp_hal::dma::DmaError;
     match value {
