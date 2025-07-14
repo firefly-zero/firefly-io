@@ -79,7 +79,7 @@ fn main() -> ! {
     let mut uart_main = {
         let miso = peripherals.GPIO21;
         let mosi = peripherals.GPIO45;
-        let config = esp_hal::uart::Config::default();
+        let config = esp_hal::uart::Config::default().with_baudrate(921_600);
         Uart::new(peripherals.UART1, config)
             .unwrap()
             .with_rx(miso)
@@ -98,7 +98,9 @@ fn main() -> ! {
         let req = Request::decode(&buf[..size]).unwrap();
 
         match actor.handle(req) {
-            RespBuf::Response(resp) => send_resp(&mut uart_main, buf, resp),
+            RespBuf::Response(resp) => {
+                send_resp(&mut uart_main, buf, resp);
+            }
             RespBuf::Incoming(addr, msg) => {
                 let resp = Response::NetIncoming(addr, &msg);
                 send_resp(&mut uart_main, buf, resp);
