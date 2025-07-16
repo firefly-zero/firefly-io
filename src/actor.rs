@@ -175,16 +175,20 @@ impl Actor<'_> {
         };
 
         let known_peer = self.manager.peer_exists(&packet.info.src_address);
-        if !known_peer && packet.data() == b"HELLO" {
-            let res = self.manager.add_peer(PeerInfo {
-                peer_address: packet.info.src_address,
-                lmk: None,
-                channel: None,
-                encrypt: false,
-                interface: EspNowWifiInterface::Sta,
-            });
-            if let Err(err) = res {
-                return Err(convert_error(err));
+        if !known_peer {
+            if packet.data() == b"HELLO" {
+                let res = self.manager.add_peer(PeerInfo {
+                    peer_address: packet.info.src_address,
+                    lmk: None,
+                    channel: None,
+                    encrypt: false,
+                    interface: EspNowWifiInterface::Sta,
+                });
+                if let Err(err) = res {
+                    return Err(convert_error(err));
+                }
+            } else {
+                return Ok(None);
             }
         }
 
