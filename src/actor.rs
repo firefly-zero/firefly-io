@@ -14,7 +14,7 @@ use esp_wifi::{config::PowerSaveMode, esp_now::*, wifi::WifiController};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
-type RawInput = (Option<(i16, i16)>, u8);
+type RawInput = (Option<(u16, u16)>, u8);
 
 pub struct Buttons<'a> {
     pub s: Input<'a>,
@@ -109,9 +109,7 @@ impl<'a> Actor<'a> {
         match self.pad.read_absolute() {
             Ok(touch) => {
                 let pad = if touch.touched() {
-                    let x = (1000. * touch.x_f32()) as i16;
-                    let y = (1000. * touch.y_f32()) as i16;
-                    Some((x, y))
+                    Some((touch.x, touch.y))
                 } else {
                     None
                 };
