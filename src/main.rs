@@ -105,6 +105,9 @@ fn main() -> ! {
 }
 
 fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) {
+    if resp == Response::NetSent {
+        return;
+    }
     let (head, tail) = buf.split_at_mut(1);
     let buf = resp.encode_buf(tail).unwrap();
     let Ok(size) = u8::try_from(buf.len()) else {

@@ -89,7 +89,10 @@ impl<'a> Actor<'a> {
                 None => Response::NetNoIncoming,
             },
             Request::NetSend(addr, data) => {
-                self.send(addr, data)?;
+                let res = self.send(addr, data);
+                if let Err(err) = res {
+                    println!("error: {err:?}");
+                }
                 Response::NetSent
             }
             Request::ReadInput => {
