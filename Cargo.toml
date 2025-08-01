@@ -2,10 +2,11 @@
 name = "firefly-io"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88.0"
 
 [dependencies]
 critical-section = "1.2.0"
-esp-backtrace = { version = "0.16.0", features = [
+esp-backtrace = { version = "0.17.0", features = [
     "esp32s3",
     "exception-handler",
     "panic-handler",
@@ -16,8 +17,8 @@ embedded-hal-bus = "0.3.0"
 embedded-io = { version = "0.6.1", default-features = false }
 esp-alloc = { version = "0.8.0" }
 esp-hal = { version = "1.0.0-beta.1", features = ["esp32s3", "unstable"] }
-esp-println = { version = "0.14.0", features = ["esp32s3"] }
-esp-wifi = { version = "0.14.1", features = ["esp32s3", "esp-now"] }
+esp-println = { version = "0.15.0", features = ["esp32s3"] }
+esp-wifi = { version = "0.15.0", features = ["esp32s3", "esp-now"] }
 esp-wifi-sys = "0.7.1"
 firefly-types = { version = "0.6.0" }
 cirque-pinnacle = "1.0.1"

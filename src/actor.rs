@@ -133,6 +133,10 @@ impl Actor<'_> {
         if res.is_err() {
             return Err("failed to start wifi");
         }
+        let res = self.manager.set_channel(6);
+        if res.is_err() {
+            return Err("failed to set esp-wifi channel");
+        }
         // let res = self.manager.set_rate(WifiPhyRate::Rate54m);
         // if res.is_err() {
         //     return Err("failed to set esp-wifi rate");

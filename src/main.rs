@@ -31,12 +31,7 @@ fn main() -> ! {
 
     println!("configuring esp-now...");
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let inited = esp_wifi::init(
-        timg0.timer0,
-        Rng::new(peripherals.RNG),
-        peripherals.RADIO_CLK,
-    )
-    .unwrap();
+    let inited = esp_wifi::init(timg0.timer0, Rng::new(peripherals.RNG)).unwrap();
     let (mut wifi, interfaces) = esp_wifi::wifi::new(&inited, peripherals.WIFI).unwrap();
     wifi.set_mode(esp_wifi::wifi::WifiMode::Sta).unwrap();
     let esp_now = interfaces.esp_now;
