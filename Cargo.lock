@@ -669,6 +669,7 @@ dependencies = [
  "esp-wifi",
  "esp-wifi-sys",
  "firefly-types",
+ "portable-atomic",
 ]
 
 [[package]]
