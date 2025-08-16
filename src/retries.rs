@@ -18,7 +18,7 @@ struct Msg {
 
 type List = LinkedList<Msg>;
 
-static QUEUE: Mutex<RefCell<List>> = Mutex::new(RefCell::new(List::new()));
+static PENDING: Mutex<RefCell<List>> = Mutex::new(RefCell::new(List::new()));
 
 pub fn start() -> Result<(), EspNowError> {
     let code = unsafe { esp_now_register_send_cb(Some(send_cb)) };
@@ -28,23 +28,23 @@ pub fn start() -> Result<(), EspNowError> {
 pub fn stop() -> Result<(), EspNowError> {
     let code = unsafe { esp_now_register_send_cb(None) };
     critical_section::with(|cs| {
-        let queue = QUEUE.borrow(cs);
-        let mut queue = queue.borrow_mut();
-        queue.clear();
+        let pending = PENDING.borrow(cs);
+        let mut pending = pending.borrow_mut();
+        pending.clear();
     });
     parse_error_code(code)
 }
 
 pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
-    while pending(addr) {
+    while is_pending(addr) {
         delay::Delay::new().delay_micros(5);
     }
     let code = unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
     if code == 0 {
         critical_section::with(|cs| {
-            let queue = QUEUE.borrow(cs);
-            let mut queue = queue.borrow_mut();
-            queue.push_back(Msg {
+            let pending = PENDING.borrow(cs);
+            let mut pending = pending.borrow_mut();
+            pending.push_back(Msg {
                 addr,
                 data: data.into(),
                 attempts: 0,
@@ -57,9 +57,9 @@ pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
 #[must_use]
 pub fn get_status(addr: Addr) -> SendStatus {
     critical_section::with(|cs| {
-        let queue = QUEUE.borrow(cs);
-        let queue = queue.borrow_mut();
-        let maybe_msg = queue.iter().find(|item| addr != item.addr);
+        let pending = PENDING.borrow(cs);
+        let pending = pending.borrow_mut();
+        let maybe_msg = pending.iter().find(|item| item.addr == addr);
         let Some(msg) = maybe_msg else {
             return SendStatus::Delivered(0);
         };
@@ -69,31 +69,31 @@ pub fn get_status(addr: Addr) -> SendStatus {
 
 fn confirm(addr: Addr) {
     critical_section::with(|cs| {
-        let queue = QUEUE.borrow(cs);
-        let mut queue = queue.borrow_mut();
-        queue.retain(|item| addr != item.addr);
+        let pending = PENDING.borrow(cs);
+        let mut pending = pending.borrow_mut();
+        pending.retain(|item| addr != item.addr);
     });
 }
 
-fn pending(addr: Addr) -> bool {
+fn is_pending(addr: Addr) -> bool {
     critical_section::with(|cs| {
-        let queue = QUEUE.borrow(cs);
-        let queue = queue.borrow();
-        queue.iter().any(|item| addr == item.addr)
+        let pending = PENDING.borrow(cs);
+        let pending = pending.borrow();
+        pending.iter().any(|item| addr == item.addr)
     })
 }
 
 fn retry(addr: Addr) -> Result<(), EspNowError> {
     let code = critical_section::with(|cs| {
-        let queue = QUEUE.borrow(cs);
-        let mut queue = queue.borrow_mut();
-        let mut maybe = queue.iter_mut().find(|item| addr == item.addr);
+        let pending = PENDING.borrow(cs);
+        let mut pending = pending.borrow_mut();
+        let mut maybe = pending.iter_mut().find(|item| item.addr == addr);
         let Some(msg) = &mut maybe else {
             return 0;
         };
         msg.attempts += 1;
         if msg.attempts >= MAX_RETRIES {
-            queue.retain(|item| addr != item.addr);
+            pending.retain(|item| addr != item.addr);
             0
         } else {
             let data = &msg.data;
