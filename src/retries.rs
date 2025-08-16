@@ -6,6 +6,7 @@ use critical_section::Mutex;
 use esp_hal::delay;
 use esp_wifi::esp_now::EspNowError;
 use esp_wifi_sys::include::*;
+use firefly_types::spi::SendStatus;
 
 const MAX_RETRIES: u8 = 15;
 
@@ -51,6 +52,18 @@ pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
         });
     }
     parse_error_code(code)
+}
+
+pub fn get_status(addr: Addr) -> SendStatus {
+    critical_section::with(|cs| {
+        let queue = QUEUE.borrow(cs);
+        let queue = queue.borrow_mut();
+        let maybe_msg = queue.iter().find(|item| addr != item.addr);
+        let Some(msg) = maybe_msg else {
+            return SendStatus::Delivered(0);
+        };
+        SendStatus::Sending(msg.attempts)
+    })
 }
 
 fn confirm(addr: Addr) {

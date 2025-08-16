@@ -20,7 +20,7 @@ esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
 esp-println = { version = "0.15.0", features = ["esp32s3"] }
 esp-wifi = { version = "0.15.0", features = ["esp32s3", "esp-now"] }
 esp-wifi-sys = "0.7.1"
-firefly-types = { version = "0.6.0" }
+firefly-types = { version = "0.6.1" }
 cirque-pinnacle = "1.0.1"
 portable-atomic = "1.11.1"
 

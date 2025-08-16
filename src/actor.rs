@@ -95,6 +95,10 @@ impl<'a> Actor<'a> {
                 }
                 Response::NetSent
             }
+            Request::NetSendStatus(addr) => {
+                let status = retries::get_status(addr);
+                Response::NetSendStatus(status)
+            }
             Request::ReadInput => {
                 let input = self.read_input()?;
                 Response::Input(input.0, input.1)
