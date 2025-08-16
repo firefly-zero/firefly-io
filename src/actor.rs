@@ -82,7 +82,7 @@ impl<'a> Actor<'a> {
                 Response::NetLocalAddr(addr)
             }
             Request::NetAdvertise => {
-                Self::advertise()?;
+                Self::advertise();
                 Response::NetAdvertised
             }
             Request::NetRecv => match self.recv()? {
@@ -90,10 +90,7 @@ impl<'a> Actor<'a> {
                 None => Response::NetNoIncoming,
             },
             Request::NetSend(addr, data) => {
-                let result = Self::send(addr, data);
-                if let Err(err) = result {
-                    println!("error: {err:?}");
-                }
+                Self::send(addr, data);
                 Response::NetSent
             }
             Request::NetSendStatus(addr) => {
@@ -183,8 +180,8 @@ impl Actor<'_> {
         addr
     }
 
-    fn advertise() -> NetworkResult<()> {
-        Self::send(BROADCAST_ADDRESS, b"HELLO")
+    fn advertise() {
+        Self::send(BROADCAST_ADDRESS, b"HELLO");
     }
 
     fn recv(&self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
@@ -215,12 +212,8 @@ impl Actor<'_> {
         Ok(Some((packet.info.src_address, data)))
     }
 
-    fn send(addr: Addr, data: &[u8]) -> NetworkResult<()> {
-        let res = retries::send(addr, data);
-        if let Err(err) = res {
-            return Err(convert_error(err));
-        }
-        Ok(())
+    fn send(addr: Addr, data: &[u8]) {
+        retries::send(addr, data);
     }
 }
 

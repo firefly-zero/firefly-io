@@ -48,7 +48,7 @@ pub fn stop() -> Result<(), EspNowError> {
 ///
 /// If there is already a pending message for the given peer,
 /// blocks until that message is delivered.
-pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
+pub fn send(addr: Addr, data: &[u8]) {
     while is_pending(addr) {
         delay::Delay::new().delay_micros(5);
     }
@@ -56,8 +56,9 @@ pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
     let code = unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
     if code == 0 {
         store_pending(addr, data);
+    } else {
+        set_status(addr, SendStatus::Failed);
     }
-    parse_error_code(code)
 }
 
 fn store_pending(addr: Addr, data: &[u8]) {
