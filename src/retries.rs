@@ -1,11 +1,13 @@
 use crate::*;
 use alloc::boxed::Box;
 use alloc::collections::LinkedList;
-use core::cell::{LazyCell, RefCell};
+use core::cell::RefCell;
 use critical_section::Mutex;
 use esp_hal::delay;
 use esp_wifi::esp_now::EspNowError;
 use esp_wifi_sys::include::*;
+
+const MAX_RETRIES: u8 = 15;
 
 struct Msg {
     addr: Addr,
@@ -15,8 +17,7 @@ struct Msg {
 
 type List = LinkedList<Msg>;
 
-static QUEUE: Mutex<LazyCell<RefCell<List>>> =
-    Mutex::new(LazyCell::new(|| RefCell::new(List::new())));
+static QUEUE: Mutex<RefCell<List>> = Mutex::new(RefCell::new(List::new()));
 
 pub fn start() -> Result<(), EspNowError> {
     let code = unsafe { esp_now_register_send_cb(Some(send_cb)) };
@@ -77,7 +78,7 @@ fn retry(addr: Addr) -> Result<(), EspNowError> {
             return 0;
         };
         msg.attempts += 1;
-        if msg.attempts >= 3 {
+        if msg.attempts >= MAX_RETRIES {
             queue.retain(|item| addr != item.addr);
             0
         } else {

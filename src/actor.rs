@@ -1,7 +1,7 @@
-use core::convert::Infallible;
-
+use crate::retries;
 use alloc::boxed::Box;
 use cirque_pinnacle::{Absolute, Touchpad};
+use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{
     delay::Delay,
@@ -144,6 +144,10 @@ impl Actor<'_> {
         // if res.is_err() {
         //     return Err("failed to set esp-wifi rate");
         // }
+        let res = retries::start();
+        if let Err(err) = res {
+            return Err(convert_error(err));
+        }
         Ok(())
     }
 
@@ -160,6 +164,10 @@ impl Actor<'_> {
             if res.is_err() {
                 return Err("peer not found, cannot remove");
             }
+        }
+        let res = retries::stop();
+        if let Err(err) = res {
+            return Err(convert_error(err));
         }
         Ok(())
     }
@@ -203,15 +211,8 @@ impl Actor<'_> {
     }
 
     fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
-        // Using EspNowSender.send is slow because it registers a callback
-        // and returns SendWaiter which forcefully awaits for delivery confirmation
-        // in the destructor. It's possible to bypass destructor with core::mem::forget
-        // but the callback registration will be done anyway.
-        // Hence we use esp-wifi-sys directly.
-        use esp_wifi_sys::include::esp_now_send;
-        let code = unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
-        if code != 0 {
-            let err = EspNowError::Error(Error::from_code(code as u32));
+        let res = retries::send(addr, data);
+        if let Err(err) = res {
             return Err(convert_error(err));
         }
         Ok(())
