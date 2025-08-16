@@ -59,7 +59,7 @@ pub fn get_status(addr: Addr) -> SendStatus {
     critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
         let pending = pending.borrow_mut();
-        let maybe_msg = pending.iter().find(|item| item.addr == addr);
+        let maybe_msg = pending.iter().find(|msg| msg.addr == addr);
         let Some(msg) = maybe_msg else {
             return SendStatus::Delivered(0);
         };
@@ -71,7 +71,7 @@ fn confirm(addr: Addr) {
     critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
         let mut pending = pending.borrow_mut();
-        pending.retain(|item| addr != item.addr);
+        pending.retain(|msg| msg.addr != addr);
     });
 }
 
@@ -79,7 +79,7 @@ fn is_pending(addr: Addr) -> bool {
     critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
         let pending = pending.borrow();
-        pending.iter().any(|item| addr == item.addr)
+        pending.iter().any(|msg| msg.addr == addr)
     })
 }
 
@@ -87,7 +87,7 @@ fn retry(addr: Addr) -> Result<(), EspNowError> {
     let code = critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
         let mut pending = pending.borrow_mut();
-        let mut maybe = pending.iter_mut().find(|item| item.addr == addr);
+        let mut maybe = pending.iter_mut().find(|msg| msg.addr == addr);
         let Some(msg) = &mut maybe else {
             return 0;
         };
