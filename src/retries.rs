@@ -16,15 +16,24 @@ struct Msg {
     attempts: u8,
 }
 
-type List = LinkedList<Msg>;
+struct State {
+    addr: Addr,
+    status: SendStatus,
+}
 
-static PENDING: Mutex<RefCell<List>> = Mutex::new(RefCell::new(List::new()));
+type Msgs = LinkedList<Msg>;
+type States = LinkedList<State>;
 
+static PENDING: Mutex<RefCell<Msgs>> = Mutex::new(RefCell::new(Msgs::new()));
+static STATES: Mutex<RefCell<States>> = Mutex::new(RefCell::new(States::new()));
+
+/// Register the send callback.
 pub fn start() -> Result<(), EspNowError> {
     let code = unsafe { esp_now_register_send_cb(Some(send_cb)) };
     parse_error_code(code)
 }
 
+/// Unregister the send callback, clear pending messages and delivery states.
 pub fn stop() -> Result<(), EspNowError> {
     let code = unsafe { esp_now_register_send_cb(None) };
     critical_section::with(|cs| {
@@ -35,39 +44,51 @@ pub fn stop() -> Result<(), EspNowError> {
     parse_error_code(code)
 }
 
+/// Send a message with retries.
+///
+/// If there is already a pending message for the given peer,
+/// blocks until that message is delivered.
 pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
     while is_pending(addr) {
         delay::Delay::new().delay_micros(5);
     }
+    set_status(addr, SendStatus::Sending(0));
     let code = unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
     if code == 0 {
-        critical_section::with(|cs| {
-            let pending = PENDING.borrow(cs);
-            let mut pending = pending.borrow_mut();
-            pending.push_back(Msg {
-                addr,
-                data: data.into(),
-                attempts: 0,
-            });
-        });
+        store_pending(addr, data);
     }
     parse_error_code(code)
 }
 
+fn store_pending(addr: Addr, data: &[u8]) {
+    critical_section::with(|cs| {
+        let pending = PENDING.borrow(cs);
+        let mut pending = pending.borrow_mut();
+        pending.push_back(Msg {
+            addr,
+            data: data.into(),
+            attempts: 0,
+        });
+    });
+}
+
+/// Get the delivery state of the latest message for the given peer.
 #[must_use]
 pub fn get_status(addr: Addr) -> SendStatus {
     critical_section::with(|cs| {
-        let pending = PENDING.borrow(cs);
-        let pending = pending.borrow_mut();
-        let maybe_msg = pending.iter().find(|msg| msg.addr == addr);
-        let Some(msg) = maybe_msg else {
-            return SendStatus::Delivered(0);
+        let states = STATES.borrow(cs);
+        let states = states.borrow();
+        let maybe_state = states.iter().find(|state| state.addr == addr);
+        let Some(state) = maybe_state else {
+            return SendStatus::Empty;
         };
-        SendStatus::Sending(msg.attempts)
+        state.status
     })
 }
 
+/// Mark the latest message for the peer as delivered.
 fn confirm(addr: Addr) {
+    set_status(addr, SendStatus::Delivered(0));
     critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
         let mut pending = pending.borrow_mut();
@@ -75,6 +96,7 @@ fn confirm(addr: Addr) {
     });
 }
 
+/// Check if there is already a message for the peer that is sent and waiting for ack.
 fn is_pending(addr: Addr) -> bool {
     critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
@@ -83,6 +105,7 @@ fn is_pending(addr: Addr) -> bool {
     })
 }
 
+/// Try re-delivering the latest message for the peer.
 fn retry(addr: Addr) -> Result<(), EspNowError> {
     let code = critical_section::with(|cs| {
         let pending = PENDING.borrow(cs);
@@ -93,10 +116,12 @@ fn retry(addr: Addr) -> Result<(), EspNowError> {
         };
         msg.attempts += 1;
         if msg.attempts >= MAX_RETRIES {
+            set_status(addr, SendStatus::Failed);
             pending.retain(|item| addr != item.addr);
             0
         } else {
             let data = &msg.data;
+            set_status(addr, SendStatus::Sending(msg.attempts));
             // TODO: move it outside CS.
             unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) }
         }
@@ -104,6 +129,7 @@ fn retry(addr: Addr) -> Result<(), EspNowError> {
     parse_error_code(code)
 }
 
+/// The callback triggered by esp-now C intrisics on ack/nak of the message.
 unsafe extern "C" fn send_cb(addr: *const u8, status: esp_now_send_status_t) {
     let is_ok = status == esp_now_send_status_t_ESP_NOW_SEND_SUCCESS;
     let addr = core::slice::from_raw_parts(addr, 6);
@@ -115,6 +141,20 @@ unsafe extern "C" fn send_cb(addr: *const u8, status: esp_now_send_status_t) {
     }
 }
 
+// Store the delivery status of the latest message for the peer.
+fn set_status(addr: Addr, send_status: SendStatus) {
+    critical_section::with(|cs| {
+        let states = STATES.borrow(cs);
+        let mut states = states.borrow_mut();
+        states.retain(|state| state.addr != addr);
+        states.push_back(State {
+            addr,
+            status: send_status,
+        });
+    });
+}
+
+/// Convert error code returned by esp-now C library into a Rust-friendly error.
 fn parse_error_code(code: core::ffi::c_int) -> Result<(), EspNowError> {
     if code == 0 {
         Ok(())
