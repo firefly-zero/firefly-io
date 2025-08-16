@@ -4,6 +4,7 @@ use alloc::collections::LinkedList;
 use core::cell::{LazyCell, RefCell};
 use critical_section::Mutex;
 use esp_hal::delay;
+use esp_wifi::esp_now::EspNowError;
 use esp_wifi_sys::include::*;
 
 struct Msg {
@@ -17,20 +18,22 @@ type List = LinkedList<Msg>;
 static QUEUE: Mutex<LazyCell<RefCell<List>>> =
     Mutex::new(LazyCell::new(|| RefCell::new(List::new())));
 
-pub fn start() {
-    _ = unsafe { esp_now_register_send_cb(Some(send_cb)) };
+pub fn start() -> Result<(), EspNowError> {
+    let code = unsafe { esp_now_register_send_cb(Some(send_cb)) };
+    parse_error_code(code)
 }
 
-pub fn stop() {
-    _ = unsafe { esp_now_register_send_cb(None) };
+pub fn stop() -> Result<(), EspNowError> {
+    let code = unsafe { esp_now_register_send_cb(None) };
     critical_section::with(|cs| {
         let queue = QUEUE.borrow(cs);
         let mut queue = queue.borrow_mut();
         queue.clear();
     });
+    parse_error_code(code)
 }
 
-pub fn send(addr: Addr, data: &[u8]) -> i32 {
+pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
     while pending(addr) {
         delay::Delay::new().delay_micros(5);
     }
@@ -46,7 +49,7 @@ pub fn send(addr: Addr, data: &[u8]) -> i32 {
             });
         });
     }
-    code
+    parse_error_code(code)
 }
 
 fn confirm(addr: Addr) {
@@ -65,23 +68,25 @@ fn pending(addr: Addr) -> bool {
     })
 }
 
-fn retry(addr: Addr) {
-    critical_section::with(|cs| {
+fn retry(addr: Addr) -> Result<(), EspNowError> {
+    let code = critical_section::with(|cs| {
         let queue = QUEUE.borrow(cs);
         let mut queue = queue.borrow_mut();
         let mut maybe = queue.iter_mut().find(|item| addr == item.addr);
         let Some(msg) = &mut maybe else {
-            return;
+            return 0;
         };
         msg.attempts += 1;
         if msg.attempts >= 3 {
             queue.retain(|item| addr != item.addr);
+            0
         } else {
             let data = &msg.data;
             // TODO: move it outside CS.
-            unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) };
+            unsafe { esp_now_send(addr.as_ptr(), data.as_ptr(), data.len()) }
         }
-    })
+    });
+    parse_error_code(code)
 }
 
 unsafe extern "C" fn send_cb(addr: *const u8, status: esp_now_send_status_t) {
@@ -91,6 +96,15 @@ unsafe extern "C" fn send_cb(addr: *const u8, status: esp_now_send_status_t) {
     if is_ok {
         confirm(addr);
     } else {
-        retry(addr);
+        _ = retry(addr);
+    }
+}
+
+fn parse_error_code(code: core::ffi::c_int) -> Result<(), EspNowError> {
+    if code == 0 {
+        Ok(())
+    } else {
+        let err = esp_wifi::esp_now::Error::from_code(code as u32);
+        Err(EspNowError::Error(err))
     }
 }
