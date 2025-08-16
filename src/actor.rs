@@ -38,6 +38,7 @@ pub struct Actor<'a> {
 }
 
 impl<'a> Actor<'a> {
+    #[must_use]
     pub fn new(
         wifi: WifiController<'a>,
         esp_now: EspNow<'a>,
@@ -46,10 +47,10 @@ impl<'a> Actor<'a> {
     ) -> Self {
         let (manager, _sender, receiver) = esp_now.split();
         let mut actor = Self {
+            pad,
             wifi,
             manager,
             receiver,
-            pad,
             buttons,
         };
         _ = actor.stop();
@@ -67,7 +68,7 @@ impl<'a> Actor<'a> {
     }
 
     fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, &'static str> {
-        let resp = match req {
+        let response = match req {
             Request::NetStart => {
                 self.start()?;
                 Response::NetStarted
@@ -77,11 +78,11 @@ impl<'a> Actor<'a> {
                 Response::NetStopped
             }
             Request::NetLocalAddr => {
-                let addr = self.local_addr();
+                let addr = Self::local_addr();
                 Response::NetLocalAddr(addr)
             }
             Request::NetAdvertise => {
-                self.advertise()?;
+                Self::advertise()?;
                 Response::NetAdvertised
             }
             Request::NetRecv => match self.recv()? {
@@ -89,8 +90,8 @@ impl<'a> Actor<'a> {
                 None => Response::NetNoIncoming,
             },
             Request::NetSend(addr, data) => {
-                let res = self.send(addr, data);
-                if let Err(err) = res {
+                let result = Self::send(addr, data);
+                if let Err(err) = result {
                     println!("error: {err:?}");
                 }
                 Response::NetSent
@@ -104,7 +105,7 @@ impl<'a> Actor<'a> {
                 Response::Input(input.0, input.1)
             }
         };
-        Ok(RespBuf::Response(resp))
+        Ok(RespBuf::Response(response))
     }
 
     fn read_input(&mut self) -> Result<RawInput, &'static str> {
@@ -176,17 +177,17 @@ impl Actor<'_> {
         Ok(())
     }
 
-    fn local_addr(&self) -> Addr {
+    fn local_addr() -> Addr {
         let mut addr = [0u8; 6];
         esp_wifi::wifi::sta_mac(&mut addr);
         addr
     }
 
-    fn advertise(&mut self) -> NetworkResult<()> {
-        self.send(BROADCAST_ADDRESS, b"HELLO")
+    fn advertise() -> NetworkResult<()> {
+        Self::send(BROADCAST_ADDRESS, b"HELLO")
     }
 
-    fn recv(&mut self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
+    fn recv(&self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
         let Some(packet) = self.receiver.receive() else {
             return Ok(None);
         };
@@ -214,7 +215,7 @@ impl Actor<'_> {
         Ok(Some((packet.info.src_address, data)))
     }
 
-    fn send(&mut self, addr: Addr, data: &[u8]) -> NetworkResult<()> {
+    fn send(addr: Addr, data: &[u8]) -> NetworkResult<()> {
         let res = retries::send(addr, data);
         if let Err(err) = res {
             return Err(convert_error(err));

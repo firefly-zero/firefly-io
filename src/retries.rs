@@ -54,6 +54,7 @@ pub fn send(addr: Addr, data: &[u8]) -> Result<(), EspNowError> {
     parse_error_code(code)
 }
 
+#[must_use]
 pub fn get_status(addr: Addr) -> SendStatus {
     critical_section::with(|cs| {
         let queue = QUEUE.borrow(cs);
@@ -118,6 +119,7 @@ fn parse_error_code(code: core::ffi::c_int) -> Result<(), EspNowError> {
     if code == 0 {
         Ok(())
     } else {
+        #[allow(clippy::cast_sign_loss)]
         let err = esp_wifi::esp_now::Error::from_code(code as u32);
         Err(EspNowError::Error(err))
     }
