@@ -11,7 +11,6 @@ use esp_hal::{
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
     main,
-    rng::Rng,
     time::Rate,
     timer::timg::TimerGroup,
     uart::Uart,
@@ -29,11 +28,15 @@ fn main() -> ! {
     println!("initializing peripherals...");
     let peripherals = esp_hal::init(config);
 
-    println!("configuring esp-now...");
+    println!("starting RTOS scheduler...");
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let inited = esp_wifi::init(timg0.timer0, Rng::new(peripherals.RNG)).unwrap();
-    let (mut wifi, interfaces) = esp_wifi::wifi::new(&inited, peripherals.WIFI).unwrap();
-    wifi.set_mode(esp_wifi::wifi::WifiMode::Sta).unwrap();
+    esp_rtos::start(timg0.timer0);
+
+    println!("configuring WiFi...");
+    let inited = esp_radio::init().unwrap();
+    let config = esp_radio::wifi::Config::default();
+    let (mut wifi, interfaces) = esp_radio::wifi::new(&inited, peripherals.WIFI, config).unwrap();
+    wifi.set_mode(esp_radio::wifi::WifiMode::Sta).unwrap();
     let esp_now = interfaces.esp_now;
 
     println!("configuring touch pad...");

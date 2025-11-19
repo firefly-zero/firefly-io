@@ -10,7 +10,8 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_wifi::{config::PowerSaveMode, esp_now::*, wifi::WifiController};
+use esp_radio::esp_now::*;
+use esp_radio::wifi::{PowerSaveMode, WifiController};
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
@@ -57,7 +58,7 @@ impl<'a> Actor<'a> {
         actor
     }
 
-    pub fn handle(&mut self, req: Request) -> RespBuf {
+    pub fn handle(&mut self, req: Request) -> RespBuf<'_> {
         match self.handle_inner(req) {
             Ok(resp) => resp,
             Err(err) => {
@@ -175,9 +176,7 @@ impl Actor<'_> {
     }
 
     fn local_addr() -> Addr {
-        let mut addr = [0u8; 6];
-        esp_wifi::wifi::sta_mac(&mut addr);
-        addr
+        esp_radio::wifi::sta_mac()
     }
 
     fn advertise() {
@@ -217,30 +216,30 @@ impl Actor<'_> {
     }
 }
 
-const fn convert_error(value: esp_wifi::esp_now::EspNowError) -> &'static str {
-    use esp_wifi::esp_now::EspNowError;
+const fn convert_error(value: esp_radio::esp_now::EspNowError) -> &'static str {
+    use esp_radio::esp_now::EspNowError;
     match value {
         EspNowError::Error(error) => match error {
-            esp_wifi::esp_now::Error::NotInitialized => "esp-now: not initialized",
-            esp_wifi::esp_now::Error::InvalidArgument => "esp-now: invalid argument",
-            esp_wifi::esp_now::Error::OutOfMemory => {
+            esp_radio::esp_now::Error::NotInitialized => "esp-now: not initialized",
+            esp_radio::esp_now::Error::InvalidArgument => "esp-now: invalid argument",
+            esp_radio::esp_now::Error::OutOfMemory => {
                 "esp-now: insufficient memory to complete the operation"
             }
-            esp_wifi::esp_now::Error::PeerListFull => "esp-now: peer list is full",
-            esp_wifi::esp_now::Error::NotFound => "esp-now: peer is not found",
-            esp_wifi::esp_now::Error::InternalError => "esp-now: internal error",
-            esp_wifi::esp_now::Error::PeerExists => "esp-now: peer already exists",
-            esp_wifi::esp_now::Error::InterfaceError => "esp-now: interface error",
-            esp_wifi::esp_now::Error::Other(_) => "esp-now: unknown error",
+            esp_radio::esp_now::Error::PeerListFull => "esp-now: peer list is full",
+            esp_radio::esp_now::Error::NotFound => "esp-now: peer is not found",
+            esp_radio::esp_now::Error::Internal => "esp-now: internal error",
+            esp_radio::esp_now::Error::PeerExists => "esp-now: peer already exists",
+            esp_radio::esp_now::Error::InterfaceMismatch => "esp-now: interface mismatch",
+            esp_radio::esp_now::Error::Other(_) => "esp-now: unknown error",
         },
         EspNowError::SendFailed => "esp-now: failed to send message",
         EspNowError::DuplicateInstance => "esp-now: duplicate instance",
         EspNowError::Initialization(error) => match error {
-            esp_wifi::wifi::WifiError::NotInitialized => "wifi init: not initialized",
-            esp_wifi::wifi::WifiError::InternalError(_) => "wifi init: internal error",
-            esp_wifi::wifi::WifiError::Disconnected => "wifi init: disconnected",
-            esp_wifi::wifi::WifiError::UnknownWifiMode => "wifi init: unknown WiFi mode",
-            esp_wifi::wifi::WifiError::Unsupported => "wifi init: unsupported",
+            esp_radio::wifi::WifiError::NotInitialized => "wifi init: not initialized",
+            esp_radio::wifi::WifiError::InternalError(_) => "wifi init: internal error",
+            esp_radio::wifi::WifiError::Disconnected => "wifi init: disconnected",
+            esp_radio::wifi::WifiError::UnknownWifiMode => "wifi init: unknown WiFi mode",
+            esp_radio::wifi::WifiError::Unsupported => "wifi init: unsupported",
             _ => "wifi init: unknown error",
         },
     }

@@ -4,7 +4,7 @@ use alloc::collections::LinkedList;
 use core::cell::RefCell;
 use critical_section::Mutex;
 use esp_hal::delay;
-use esp_wifi::esp_now::EspNowError;
+use esp_radio::esp_now::EspNowError;
 use esp_wifi_sys::include::*;
 use firefly_types::spi::SendStatus;
 
@@ -131,14 +131,27 @@ fn retry(addr: Addr) -> Result<(), EspNowError> {
 }
 
 /// The callback triggered by esp-now C intrisics on ack/nak of the message.
-unsafe extern "C" fn send_cb(addr: *const u8, status: esp_now_send_status_t) {
+unsafe extern "C" fn send_cb(info: *const esp_now_send_info_t, status: esp_now_send_status_t) {
     let is_ok = status == esp_now_send_status_t_ESP_NOW_SEND_SUCCESS;
-    let addr = core::slice::from_raw_parts(addr, 6);
-    let addr: Addr = addr.try_into().unwrap();
+    let addr: Addr = cast_addr((*info).des_addr);
     if is_ok {
         confirm(addr);
     } else {
         _ = retry(addr);
+    }
+}
+
+/// Read MAC address from memory at the given raw pointer.
+const fn cast_addr(ptr: *mut u8) -> Addr {
+    unsafe {
+        [
+            ptr.offset(0).read(),
+            ptr.offset(1).read(),
+            ptr.offset(2).read(),
+            ptr.offset(3).read(),
+            ptr.offset(4).read(),
+            ptr.offset(5).read(),
+        ]
     }
 }
 
@@ -161,7 +174,7 @@ fn parse_error_code(code: core::ffi::c_int) -> Result<(), EspNowError> {
         Ok(())
     } else {
         #[allow(clippy::cast_sign_loss)]
-        let err = esp_wifi::esp_now::Error::from_code(code as u32);
+        let err = esp_radio::esp_now::Error::from_code(code as u32);
         Err(EspNowError::Error(err))
     }
 }
