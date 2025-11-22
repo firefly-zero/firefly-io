@@ -10,5 +10,7 @@
 )]
 extern crate alloc;
 mod actor;
+mod error;
 pub mod retries;
 pub use actor::*;
+pub use error::ErrPrinter;

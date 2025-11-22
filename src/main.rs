@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
 use esp_backtrace as _;
@@ -11,6 +12,7 @@ use esp_hal::{
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
     main,
+    system::software_reset,
     time::Rate,
     timer::timg::TimerGroup,
     uart::Uart,
@@ -22,6 +24,17 @@ use firefly_types::{spi::*, Encode};
 
 #[main]
 fn main() -> ! {
+    let res = run();
+    match res {
+        Ok(()) => println!("unexpected exit"),
+        Err(err) => println!("fatal error: {}", ErrPrinter(err)),
+    }
+    // If the code fails, restart the chip.
+    // TODO(@orsinium): add a sleep delay to not restart with a too high rate.
+    software_reset()
+}
+
+fn run() -> Result<()> {
     esp_alloc::heap_allocator!(size: 120 * 1024);
     println!("creating device config...");
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -33,10 +46,12 @@ fn main() -> ! {
     esp_rtos::start(timg0.timer0);
 
     println!("configuring WiFi...");
-    let inited = esp_radio::init().unwrap();
+    let inited = esp_radio::init().context("init wifi")?;
     let config = esp_radio::wifi::Config::default();
-    let (mut wifi, interfaces) = esp_radio::wifi::new(&inited, peripherals.WIFI, config).unwrap();
-    wifi.set_mode(esp_radio::wifi::WifiMode::Sta).unwrap();
+    let (mut wifi, interfaces) = esp_radio::wifi::new(&inited, peripherals.WIFI, config)
+        .context("create wifi controller")?;
+    wifi.set_mode(esp_radio::wifi::WifiMode::Sta)
+        .context("enter sta mode")?;
     let esp_now = interfaces.esp_now;
 
     println!("configuring touch pad...");
@@ -53,12 +68,13 @@ fn main() -> ! {
             .with_frequency(Rate::from_khz(400))
             .with_mode(esp_hal::spi::Mode::_1);
         let spi = esp_hal::spi::master::Spi::new(peripherals.SPI3, config)
-            .unwrap()
+            .context("init spi")?
             .with_sck(sclk)
             .with_mosi(mosi)
             .with_miso(miso);
-        let spi_device = ExclusiveDevice::new(spi, cs, delay).unwrap();
+        let spi_device = ExclusiveDevice::new(spi, cs, delay).context("access spi")?;
         let mode = cirque_pinnacle::Absolute::default();
+        // TODO(@orsinium): don't unwrap
         mode.init(spi_device).unwrap()
     };
 
@@ -79,7 +95,7 @@ fn main() -> ! {
         let mosi = peripherals.GPIO45;
         let config = esp_hal::uart::Config::default().with_baudrate(921_600);
         Uart::new(peripherals.UART1, config)
-            .unwrap()
+            .context("init uart")?
             .with_rx(miso)
             .with_tx(mosi)
     };
@@ -88,43 +104,46 @@ fn main() -> ! {
     let buf = &mut [0u8; 300];
     loop {
         // read request size
-        uart_main.read(&mut buf[..1]).unwrap();
+        uart_main.read(&mut buf[..1]).context("read request size")?;
         let size = usize::from(buf[0]);
 
         // read request payload
+        // TODO(@orsinium): don't unwrap
         uart_main.read_exact(&mut buf[..size]).unwrap();
-        let req = Request::decode(&buf[..size]).unwrap();
+        let req = Request::decode(&buf[..size]).context("decode request")?;
 
         match actor.handle(req) {
             RespBuf::Response(resp) => {
-                send_resp(&mut uart_main, buf, resp);
+                send_resp(&mut uart_main, buf, resp)?;
             }
             RespBuf::Incoming(addr, msg) => {
                 let resp = Response::NetIncoming(addr, &msg);
-                send_resp(&mut uart_main, buf, resp);
+                send_resp(&mut uart_main, buf, resp)?;
             }
         };
     }
 }
 
 /// Serialize response and write it into UART.
-fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) {
+fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) -> Result<()> {
     if resp == Response::NetSent {
-        return;
+        return Ok(());
     }
     let (head, tail) = buf.split_at_mut(1);
-    let buf = resp.encode_buf(tail).unwrap();
+    let buf = resp.encode_buf(tail).context("encode response")?;
     let Ok(size) = u8::try_from(buf.len()) else {
         // The payload is too big. The only Response that can, in theory, be big
         // is NetIncoming. So we can assume that it's a message receiving error.
         // But just in case, we want to be sure not to fall into an infinite recursion.
         if !matches!(resp, Response::Error(_)) {
+            println!("error: response is too big");
             let resp = Response::Error("response is too big");
-            send_resp(uart, buf, resp);
+            send_resp(uart, buf, resp)?;
         }
-        return;
+        return Ok(());
     };
     head[0] = size;
-    uart.write(head).unwrap();
-    uart.write(buf).unwrap();
+    uart.write(head).context("write size")?;
+    uart.write(buf).context("write response")?;
+    Ok(())
 }
