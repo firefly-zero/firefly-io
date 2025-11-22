@@ -107,6 +107,7 @@ fn main() -> ! {
     }
 }
 
+/// Serialize response and write it into UART.
 fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) {
     if resp == Response::NetSent {
         return;
