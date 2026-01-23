@@ -33,6 +33,10 @@ cirque-pinnacle = "1.0.1"
 portable-atomic = "1.11.1"
 anyhow = { version = "1.0.100", default-features = false }
 
+[features]
+default = ["v2"]
+v2 = []
+
 [profile.release]
 strip = true             # Automatically strip symbols from the binary.
 codegen-units = 1        # LLVM can perform better optimizations using a single thread

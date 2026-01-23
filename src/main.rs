@@ -55,6 +55,7 @@ fn run() -> Result<()> {
     let esp_now = interfaces.esp_now;
 
     println!("configuring touch pad...");
+    #[cfg(not(feature = "v2"))]
     let pad = {
         let delay = Delay::new();
         let sclk = peripherals.GPIO4;
@@ -78,7 +79,33 @@ fn run() -> Result<()> {
         mode.init(spi_device).unwrap()
     };
 
+    #[cfg(feature = "v2")]
+    let pad = {
+        let delay = Delay::new();
+        let sclk = peripherals.GPIO3;
+        let miso = peripherals.GPIO46;
+        let mosi = peripherals.GPIO11;
+        let cs = peripherals.GPIO9;
+        // let dr = peripherals.GPIO10;
+
+        let cs = Output::new(cs, Level::High, OutputConfig::default());
+        let config = esp_hal::spi::master::Config::default()
+            .with_frequency(Rate::from_khz(400))
+            .with_mode(esp_hal::spi::Mode::_1);
+        let spi = esp_hal::spi::master::Spi::new(peripherals.SPI3, config)
+            .context("init spi")?
+            .with_sck(sclk)
+            .with_mosi(mosi)
+            .with_miso(miso);
+        let spi_device = ExclusiveDevice::new(spi, cs, delay).context("access spi")?;
+        let mode = cirque_pinnacle::Absolute::default();
+        // TODO(@orsinium): don't unwrap
+        mode.init(spi_device).unwrap()
+    };
+
     let up = InputConfig::default().with_pull(esp_hal::gpio::Pull::Up);
+
+    #[cfg(not(feature = "v2"))]
     let buttons = Buttons {
         s: Input::new(peripherals.GPIO9, up),
         e: Input::new(peripherals.GPIO46, up),
@@ -86,10 +113,19 @@ fn run() -> Result<()> {
         n: Input::new(peripherals.GPIO10, up),
         menu: Input::new(peripherals.GPIO3, up),
     };
+    #[cfg(feature = "v2")]
+    let buttons = Buttons {
+        s: Input::new(peripherals.GPIO2, up),
+        e: Input::new(peripherals.GPIO43, up),
+        w: Input::new(peripherals.GPIO1, up),
+        n: Input::new(peripherals.GPIO44, up),
+        menu: Input::new(peripherals.GPIO41, up),
+    };
 
     let mut actor = Actor::new(wifi, esp_now, pad, buttons);
 
     println!("configuring main SPI...");
+    #[cfg(not(feature = "v2"))]
     let mut uart_main = {
         let miso = peripherals.GPIO21;
         let mosi = peripherals.GPIO45;
@@ -98,6 +134,14 @@ fn run() -> Result<()> {
             .context("init uart")?
             .with_rx(miso)
             .with_tx(mosi)
+    };
+    #[cfg(feature = "v2")]
+    let mut uart_main = {
+        let config = esp_hal::uart::Config::default().with_baudrate(921_600);
+        Uart::new(peripherals.UART1, config)
+            .context("init uart")?
+            .with_rx(peripherals.GPIO16)
+            .with_tx(peripherals.GPIO17)
     };
 
     println!("listening...");
