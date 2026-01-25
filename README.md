@@ -4,9 +4,4 @@ Firemware for the second chip on Firefly Zero. At the moment, it handles multipl
 
 ## Flashing
 
-1. [Install espup](https://github.com/esp-rs/espup)
-1. [Install task](https://taskfile.dev/)
-1. `espup install`
-1. `. ~/export-esp.sh`
-1. Connect to the right chip on the device.
-1. `task flash -- --port /dev/ttyACM0`
+See flashing guide in [firefly-main](https://github.com/firefly-zero/firefly-main). Everything is the same except you need to connect to the other USB port on the device.
