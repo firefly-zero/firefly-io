@@ -24,21 +24,23 @@ use firefly_types::{spi::*, Encode};
 
 #[main]
 fn main() -> ! {
+    esp_alloc::heap_allocator!(size: 120 * 1024);
+
     let res = run();
     match res {
         Ok(()) => println!("unexpected exit"),
         Err(err) => println!("fatal error: {}", ErrPrinter(err)),
     }
+
     // If the code fails, restart the chip.
-    // TODO(@orsinium): add a sleep delay to not restart with a too high rate.
-    software_reset()
+    let delay = Delay::new();
+    delay.delay(esp_hal::time::Duration::from_millis(500));
+    software_reset();
 }
 
 fn run() -> Result<()> {
-    esp_alloc::heap_allocator!(size: 120 * 1024);
-    println!("creating device config...");
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     println!("initializing peripherals...");
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
     println!("starting RTOS scheduler...");
@@ -54,7 +56,7 @@ fn run() -> Result<()> {
         .context("enter sta mode")?;
     let esp_now = interfaces.esp_now;
 
-    println!("configuring touch pad...");
+    println!("configuring touchpad...");
     #[cfg(not(feature = "v2"))]
     let pad = {
         let delay = Delay::new();
