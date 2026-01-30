@@ -2,7 +2,6 @@ use crate::*;
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
-use esp_backtrace as _;
 use esp_hal::{
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
