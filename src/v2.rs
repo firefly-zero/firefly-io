@@ -113,6 +113,18 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
                 let resp = Response::NetIncoming(addr, &msg);
                 send_resp(&mut uart_main, buf, resp)?;
             }
+            RespBuf::Scan(ssids) => {
+                let ssids = [
+                    ssids[0].as_str(),
+                    ssids[1].as_str(),
+                    ssids[2].as_str(),
+                    ssids[3].as_str(),
+                    ssids[4].as_str(),
+                    ssids[5].as_str(),
+                ];
+                let resp = Response::WifiScan(ssids);
+                send_resp(&mut uart_main, buf, resp)?;
+            }
         }
     }
 }

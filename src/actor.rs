@@ -1,5 +1,8 @@
 use crate::retries;
-use alloc::{boxed::Box, string::ToString};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -10,8 +13,8 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_radio::esp_now::*;
 use esp_radio::wifi::{PowerSaveMode, WifiController};
+use esp_radio::{esp_now::*, wifi::ScanConfig};
 use firefly_types::spi::*;
 use smoltcp::socket::tcp;
 use smoltcp::wire::{IpAddress, IpEndpoint};
@@ -27,9 +30,11 @@ pub struct Buttons<'a> {
     pub menu: Input<'a>,
 }
 
+/// An extension for [`Response`] that owns fields that the original struct borrows.
 pub enum RespBuf<'a> {
     Response(Response<'a>),
     Incoming([u8; 6], Box<[u8]>),
+    Scan([String; 6]),
 }
 
 pub struct Actor<'a> {
@@ -110,6 +115,10 @@ impl<'a> Actor<'a> {
                 let input = self.read_input()?;
                 Response::Input(input.0, input.1)
             }
+            Request::WifiScan => {
+                let ssids = self.wifi_scan()?;
+                return Ok(RespBuf::Scan(ssids));
+            }
             Request::WifiConnect(ssid, pass) => {
                 self.wifi_connect(ssid, pass)?;
                 Response::WifiConnected
@@ -153,34 +162,9 @@ impl<'a> Actor<'a> {
 pub type Addr = [u8; 6];
 type NetworkResult<T> = Result<T, &'static str>;
 
+// WiFi- and TCP-related methods.
 impl Actor<'_> {
-    fn start(&mut self) -> NetworkResult<()> {
-        let res = self.wifi.set_power_saving(PowerSaveMode::None);
-        if res.is_err() {
-            return Err("failed to exit power saving mode");
-        }
-        let res = self.wifi.start();
-        if res.is_err() {
-            return Err("failed to start wifi");
-        }
-        let res = self.manager.set_channel(6);
-        if res.is_err() {
-            return Err("failed to set esp-wifi channel");
-        }
-        // let res = self.manager.set_rate(WifiPhyRate::Rate54m);
-        // if res.is_err() {
-        //     return Err("failed to set esp-wifi rate");
-        // }
-        let res = retries::start();
-        if let Err(err) = res {
-            return Err(convert_error(err));
-        }
-        Ok(())
-    }
-
-    fn wifi_connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
-        use esp_radio::wifi::*;
-
+    fn wifi_start(&mut self) -> NetworkResult<()> {
         let res = self.wifi.set_power_saving(PowerSaveMode::None);
         if res.is_err() {
             return Err("failed to exit power saving mode");
@@ -191,6 +175,24 @@ impl Actor<'_> {
                 return Err("failed to start wifi");
             }
         }
+        Ok(())
+    }
+
+    fn wifi_scan(&mut self) -> NetworkResult<[String; 6]> {
+        self.wifi_start()?;
+        let config = ScanConfig::default().with_max(6);
+        let Ok(points) = self.wifi.scan_with_config(config) else {
+            return Err("failed to scan for networks");
+        };
+        let mut ssids = [const { String::new() }; 6];
+        for (i, point) in points.into_iter().enumerate() {
+            ssids[i] = point.ssid;
+        }
+        Ok(ssids)
+    }
+
+    fn wifi_connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
+        use esp_radio::wifi::*;
         let config = ClientConfig::default()
             .with_ssid(ssid.to_string())
             .with_password(pass.to_string());
@@ -235,6 +237,26 @@ impl Actor<'_> {
 
     fn tcp_close(&mut self) {
         self.socket.abort();
+    }
+}
+
+// Input- and Multiplayer-related methods.
+impl Actor<'_> {
+    fn start(&mut self) -> NetworkResult<()> {
+        self.wifi_start()?;
+        let res = self.manager.set_channel(6);
+        if res.is_err() {
+            return Err("failed to set esp-wifi channel");
+        }
+        // let res = self.manager.set_rate(WifiPhyRate::Rate54m);
+        // if res.is_err() {
+        //     return Err("failed to set esp-wifi rate");
+        // }
+        let res = retries::start();
+        if let Err(err) = res {
+            return Err(convert_error(err));
+        }
+        Ok(())
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
