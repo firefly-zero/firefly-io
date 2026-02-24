@@ -1,4 +1,5 @@
 use crate::*;
+use alloc::vec;
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
@@ -12,6 +13,8 @@ use esp_hal::{
 };
 use esp_println::println;
 use firefly_types::{spi::*, Encode};
+use smoltcp::socket::tcp;
+use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr};
 
 pub fn run_v1(peripherals: Peripherals) -> Result<()> {
     println!("starting RTOS scheduler...");
@@ -60,7 +63,26 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
         menu: Input::new(peripherals.GPIO3, up),
     };
 
-    let mut actor = Actor::new(wifi, esp_now, pad, buttons);
+    println!("configuring TCP/IP stack...");
+    let mut device = interfaces.sta;
+    let addr = EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
+    let config = smoltcp::iface::Config::new(addr.into());
+    let now = smoltcp::time::Instant::from_micros(1);
+    let mut iface = smoltcp::iface::Interface::new(config, &mut device, now);
+    iface.update_ip_addrs(|ip_addrs| {
+        ip_addrs
+            .push(IpCidr::new(IpAddress::v4(192, 168, 69, 1), 24))
+            .unwrap();
+    });
+    iface
+        .routes_mut()
+        .add_default_ipv4_route(core::net::Ipv4Addr::new(192, 168, 69, 100))
+        .unwrap();
+    let rbuf = tcp::SocketBuffer::new(vec![0; 1024]);
+    let tbuf = tcp::SocketBuffer::new(vec![0; 1024]);
+    let tcp_socket = tcp::Socket::new(rbuf, tbuf);
+
+    let mut actor = Actor::new(wifi, esp_now, pad, buttons, tcp_socket, iface);
 
     println!("configuring main SPI...");
     let mut uart_main = {

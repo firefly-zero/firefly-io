@@ -202,6 +202,7 @@ impl Actor<'_> {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn tcp_connect(&mut self, ip: u32, port: u16) -> NetworkResult<()> {
         let cx = self.iface.context();
         let addr = IpAddress::v4(
