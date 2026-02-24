@@ -114,6 +114,10 @@ impl<'a> Actor<'a> {
                 self.wifi_connect(ssid, pass)?;
                 Response::WifiConnected
             }
+            Request::WifiDisconnect => {
+                self.wifi_disconnect()?;
+                Response::WifiDisconnected
+            }
             Request::TcpConnect(ip, port) => {
                 self.tcp_connect(ip, port)?;
                 Response::TcpConnected
@@ -198,6 +202,14 @@ impl Actor<'_> {
         let res = self.wifi.connect();
         if res.is_err() {
             return Err("failed to connect to wifi");
+        }
+        Ok(())
+    }
+
+    fn wifi_disconnect(&mut self) -> NetworkResult<()> {
+        let res = self.wifi.disconnect();
+        if res.is_err() {
+            return Err("failed to disconnect from wifi");
         }
         Ok(())
     }
