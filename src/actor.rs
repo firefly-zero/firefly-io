@@ -1,5 +1,5 @@
 use crate::retries;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::ToString};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -13,6 +13,8 @@ use esp_println::println;
 use esp_radio::esp_now::*;
 use esp_radio::wifi::{PowerSaveMode, WifiController};
 use firefly_types::spi::*;
+use smoltcp::socket::tcp;
+use smoltcp::wire::{IpAddress, IpEndpoint};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
@@ -36,6 +38,8 @@ pub struct Actor<'a> {
     manager: EspNowManager<'a>,
     receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
+    socket: tcp::Socket<'a>,
+    iface: smoltcp::iface::Interface,
 }
 
 impl<'a> Actor<'a> {
@@ -45,6 +49,8 @@ impl<'a> Actor<'a> {
         esp_now: EspNow<'a>,
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
+        socket: tcp::Socket<'a>,
+        iface: smoltcp::iface::Interface,
     ) -> Self {
         let (manager, _sender, receiver) = esp_now.split();
         let mut actor = Self {
@@ -53,6 +59,8 @@ impl<'a> Actor<'a> {
             manager,
             receiver,
             buttons,
+            socket,
+            iface,
         };
         _ = actor.stop();
         actor
@@ -101,6 +109,18 @@ impl<'a> Actor<'a> {
             Request::ReadInput => {
                 let input = self.read_input()?;
                 Response::Input(input.0, input.1)
+            }
+            Request::WifiConnect(ssid, pass) => {
+                self.wifi_connect(ssid, pass)?;
+                Response::WifiConnected
+            }
+            Request::TcpConnect(ip, port) => {
+                self.tcp_connect(ip, port)?;
+                Response::TcpConnected
+            }
+            Request::TcpClose => {
+                self.tcp_close();
+                Response::TcpClosed
             }
         };
         Ok(RespBuf::Response(response))
@@ -152,6 +172,56 @@ impl Actor<'_> {
             return Err(convert_error(err));
         }
         Ok(())
+    }
+
+    fn wifi_connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
+        use esp_radio::wifi::*;
+
+        let res = self.wifi.set_power_saving(PowerSaveMode::None);
+        if res.is_err() {
+            return Err("failed to exit power saving mode");
+        }
+        if !self.wifi.is_started().unwrap_or_default() {
+            let res = self.wifi.start();
+            if res.is_err() {
+                return Err("failed to start wifi");
+            }
+        }
+        let config = ClientConfig::default()
+            .with_ssid(ssid.to_string())
+            .with_password(pass.to_string());
+        let config = ModeConfig::Client(config);
+        let res = self.wifi.set_config(&config);
+        if res.is_err() {
+            return Err("failed to set wifi config");
+        }
+        let res = self.wifi.connect();
+        if res.is_err() {
+            return Err("failed to connect to wifi");
+        }
+        Ok(())
+    }
+
+    fn tcp_connect(&mut self, ip: u32, port: u16) -> NetworkResult<()> {
+        let cx = self.iface.context();
+        let addr = IpAddress::v4(
+            (ip >> 24) as u8,
+            (ip >> 16) as u8,
+            (ip >> 8) as u8,
+            ip as u8,
+        );
+        let remote_endpoint = IpEndpoint::new(addr, port);
+        // TODO: Random port (49152 + rand() % 16384)
+        let local_endpoint = 49153;
+        let res = self.socket.connect(cx, remote_endpoint, local_endpoint);
+        if res.is_err() {
+            return Err("failed to connect to the TCP endpoint");
+        }
+        Ok(())
+    }
+
+    fn tcp_close(&mut self) {
+        self.socket.abort();
     }
 
     fn stop(&mut self) -> NetworkResult<()> {

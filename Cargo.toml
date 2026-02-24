@@ -5,33 +5,43 @@ edition = "2021"
 rust-version = "1.88.0"
 
 [dependencies]
+anyhow = { version = "1.0.102", default-features = false }
+cirque-pinnacle = "1.0.1"
 critical-section = "1.2.0"
+embedded-hal = { version = "1.0.0" }
+embedded-hal-bus = "0.3.0"
+embedded-io = { version = "0.7.1", default-features = false }
+esp-alloc = { version = "0.9.0" }
 esp-backtrace = { version = "0.18.1", features = [
     "esp32s3",
     "panic-handler",
     "println",
 ] }
-embedded-hal = { version = "1.0.0" }
-embedded-hal-bus = "0.3.0"
-embedded-io = { version = "0.7.1", default-features = false }
-esp-alloc = { version = "0.9.0" }
 esp-hal = { version = "1.0.0", features = ["esp32s3", "unstable"] }
 esp-println = { version = "0.16.1", features = ["esp32s3"] }
+esp-radio = { version = "0.17.0", features = [
+    "esp32s3",
+    "esp-now",
+    "unstable",
+    "smoltcp",
+] }
 esp-rtos = { version = "0.2.0", features = [
     "esp32s3",
     "esp-radio",
     "esp-alloc",
 ] }
-esp-radio = { version = "0.17.0", features = [
-    "esp32s3",
-    "esp-now",
-    "unstable",
-] }
 esp-wifi-sys = "0.8.1"
 firefly-types = "0.8.1"
-cirque-pinnacle = "1.0.1"
 portable-atomic = "1.13.1"
-anyhow = { version = "1.0.102", default-features = false }
+smoltcp = { version = "0.12.0", default-features = false, features = [
+    "proto-ipv4",
+    "medium-ethernet",
+    "alloc",
+    "socket-tcp",
+] }
+
+[patch.crates-io]
+firefly-types = { path = "../firefly-types" }
 
 [features]
 default = []
