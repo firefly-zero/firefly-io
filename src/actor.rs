@@ -13,7 +13,7 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_radio::wifi::{PowerSaveMode, WifiController};
+use esp_radio::wifi::{PowerSaveMode, WifiController, WifiError};
 use esp_radio::{esp_now::*, wifi::ScanConfig};
 use firefly_types::spi::*;
 use smoltcp::socket::tcp;
@@ -123,6 +123,10 @@ impl<'a> Actor<'a> {
                 self.wifi_connect(ssid, pass)?;
                 Response::WifiConnected
             }
+            Request::WifiStatus => {
+                let status = self.wifi_status()?;
+                Response::WifiStatus(status)
+            }
             Request::WifiDisconnect => {
                 self.wifi_disconnect()?;
                 Response::WifiDisconnected
@@ -130,6 +134,14 @@ impl<'a> Actor<'a> {
             Request::TcpConnect(ip, port) => {
                 self.tcp_connect(ip, port)?;
                 Response::TcpConnected
+            }
+            Request::TcpStatus => {
+                let status = self.tcp_status();
+                Response::TcpStatus(status)
+            }
+            Request::TcpSend(data) => {
+                self.tcp_send(data)?;
+                Response::TcpSent
             }
             Request::TcpClose => {
                 self.tcp_close();
@@ -208,6 +220,15 @@ impl Actor<'_> {
         Ok(())
     }
 
+    fn wifi_status(&self) -> NetworkResult<u8> {
+        match self.wifi.is_connected() {
+            Ok(true) => Ok(1),
+            Err(WifiError::Disconnected) => Ok(2),
+            Ok(false) => Ok(3),
+            Err(_) => Err("failed to connect to wifi"),
+        }
+    }
+
     fn wifi_disconnect(&mut self) -> NetworkResult<()> {
         let res = self.wifi.disconnect();
         if res.is_err() {
@@ -233,6 +254,31 @@ impl Actor<'_> {
             return Err("failed to connect to the TCP endpoint");
         }
         Ok(())
+    }
+
+    fn tcp_status(&self) -> u8 {
+        match self.socket.state() {
+            tcp::State::Closed => 1,
+            tcp::State::Listen => 2,
+            tcp::State::SynSent => 3,
+            tcp::State::SynReceived => 4,
+            tcp::State::Established => 5,
+            tcp::State::FinWait1 => 6,
+            tcp::State::FinWait2 => 7,
+            tcp::State::CloseWait => 8,
+            tcp::State::Closing => 9,
+            tcp::State::LastAck => 10,
+            tcp::State::TimeWait => 11,
+        }
+    }
+
+    fn tcp_send(&mut self, data: &[u8]) -> NetworkResult<u8> {
+        let Ok(n) = self.socket.send_slice(data) else {
+            return Err("failed to send TCP data");
+        };
+        self.socket.close();
+        #[expect(clippy::cast_possible_truncation)]
+        Ok(n as u8)
     }
 
     fn tcp_close(&mut self) {
