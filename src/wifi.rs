@@ -6,7 +6,7 @@ use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, Wif
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
     socket::{dhcpv4, tcp},
-    wire::{EthernetAddress, IpAddress, IpEndpoint},
+    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint},
 };
 
 pub struct WifiManager<'a> {
@@ -24,7 +24,8 @@ type NetworkResult<T> = Result<T, &'static str>;
 impl<'a> WifiManager<'a> {
     pub fn new(device: WifiDevice<'a>, controller: WifiController<'a>) -> Self {
         let mut device = device;
-        let addr = EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        let addr = device.mac_address();
+        let addr = EthernetAddress(addr);
         let config = smoltcp::iface::Config::new(addr.into());
         let now = smoltcp::time::Instant::from_micros(1);
         let iface = smoltcp::iface::Interface::new(config, &mut device, now);
@@ -67,6 +68,14 @@ impl<'a> WifiManager<'a> {
         Ok(())
     }
 
+    fn poll(&mut self) {
+        let now = esp_hal::time::Instant::now();
+        let now = now.duration_since_epoch().as_micros();
+        #[expect(clippy::cast_possible_wrap)]
+        let now = smoltcp::time::Instant::from_micros(now as i64);
+        self.iface.poll(now, &mut self.device, &mut self.sockets);
+    }
+
     pub fn scan(&mut self) -> NetworkResult<[String; 6]> {
         self.start()?;
         let config = ScanConfig::default().with_max(6);
@@ -97,11 +106,19 @@ impl<'a> WifiManager<'a> {
         Ok(())
     }
 
-    pub fn status(&self) -> NetworkResult<u8> {
+    pub fn status(&mut self) -> NetworkResult<u8> {
         match self.controller.is_connected() {
-            Ok(true) => Ok(1),
+            Ok(false) => Ok(1),
             Err(WifiError::Disconnected) => Ok(2),
-            Ok(false) => Ok(3),
+            Ok(true) => {
+                self.poll();
+                self.dhcp_poll();
+                if self.iface.ip_addrs().is_empty() {
+                    Ok(3)
+                } else {
+                    Ok(4)
+                }
+            }
             Err(_) => Err("failed to connect to wifi"),
         }
     }
@@ -112,6 +129,35 @@ impl<'a> WifiManager<'a> {
             return Err("failed to disconnect from wifi");
         }
         Ok(())
+    }
+
+    fn dhcp_poll(&mut self) {
+        use dhcpv4::Event;
+
+        let socket: &mut dhcpv4::Socket = self.sockets.get_mut(self.dhcp_ref);
+        let event = socket.poll();
+        let Some(event) = event else {
+            return;
+        };
+        match event {
+            Event::Configured(config) => {
+                self.iface.update_ip_addrs(|addrs| {
+                    addrs.clear();
+                    let addr = IpCidr::Ipv4(config.address);
+                    addrs.push(addr).unwrap();
+                });
+                if let Some(router) = config.router {
+                    let routes = self.iface.routes_mut();
+                    routes.add_default_ipv4_route(router).unwrap();
+                }
+            }
+            Event::Deconfigured => {
+                #[expect(clippy::redundant_closure_for_method_calls)]
+                self.iface.update_ip_addrs(|addrs| addrs.clear());
+                let routes = self.iface.routes_mut();
+                routes.remove_default_ipv4_route();
+            }
+        }
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -135,7 +181,7 @@ impl<'a> WifiManager<'a> {
     }
 
     pub fn tcp_status(&mut self) -> u8 {
-        self.tcp_poll();
+        self.poll();
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
         match socket.state() {
             tcp::State::Closed => 1,
@@ -150,14 +196,6 @@ impl<'a> WifiManager<'a> {
             tcp::State::LastAck => 10,
             tcp::State::TimeWait => 11,
         }
-    }
-
-    pub fn tcp_poll(&mut self) {
-        let now = esp_hal::time::Instant::now();
-        let now = now.duration_since_epoch().as_micros();
-        #[expect(clippy::cast_possible_wrap)]
-        let now = smoltcp::time::Instant::from_micros(now as i64);
-        self.iface.poll(now, &mut self.device, &mut self.sockets);
     }
 
     pub fn tcp_send(&mut self, data: &[u8]) -> NetworkResult<u8> {
