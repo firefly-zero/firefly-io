@@ -82,7 +82,7 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
     let tbuf = tcp::SocketBuffer::new(vec![0; 1024]);
     let tcp_socket = tcp::Socket::new(rbuf, tbuf);
 
-    let mut actor = Actor::new(wifi, esp_now, pad, buttons, tcp_socket, iface);
+    let mut actor = Actor::new(wifi, esp_now, pad, buttons, tcp_socket, iface, device);
 
     println!("configuring main SPI...");
     let mut uart_main = {

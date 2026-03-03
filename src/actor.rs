@@ -13,11 +13,14 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_radio::wifi::{PowerSaveMode, WifiController, WifiError};
+use esp_radio::wifi::{PowerSaveMode, WifiController, WifiDevice, WifiError};
 use esp_radio::{esp_now::*, wifi::ScanConfig};
 use firefly_types::spi::*;
-use smoltcp::socket::tcp;
-use smoltcp::wire::{IpAddress, IpEndpoint};
+use smoltcp::{
+    iface::SocketHandle,
+    wire::{IpAddress, IpEndpoint},
+};
+use smoltcp::{iface::SocketSet, socket::tcp};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
@@ -43,8 +46,10 @@ pub struct Actor<'a> {
     manager: EspNowManager<'a>,
     receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
-    socket: tcp::Socket<'a>,
+    sockets: SocketSet<'a>,
+    socket_ref: SocketHandle,
     iface: smoltcp::iface::Interface,
+    wifi_device: WifiDevice<'a>,
 }
 
 impl<'a> Actor<'a> {
@@ -56,16 +61,21 @@ impl<'a> Actor<'a> {
         buttons: Buttons<'a>,
         socket: tcp::Socket<'a>,
         iface: smoltcp::iface::Interface,
+        wifi_device: WifiDevice<'a>,
     ) -> Self {
         let (manager, _sender, receiver) = esp_now.split();
+        let mut sockets = SocketSet::new(alloc::vec::Vec::new());
+        let socket_ref = sockets.add(socket);
         let mut actor = Self {
             pad,
             wifi,
             manager,
             receiver,
             buttons,
-            socket,
+            sockets,
+            socket_ref,
             iface,
+            wifi_device,
         };
         _ = actor.stop();
         actor
@@ -249,15 +259,18 @@ impl Actor<'_> {
         let remote_endpoint = IpEndpoint::new(addr, port);
         // TODO: Random port (49152 + rand() % 16384)
         let local_endpoint = 49153;
-        let res = self.socket.connect(cx, remote_endpoint, local_endpoint);
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
+        let res = socket.connect(cx, remote_endpoint, local_endpoint);
         if res.is_err() {
             return Err("failed to connect to the TCP endpoint");
         }
         Ok(())
     }
 
-    fn tcp_status(&self) -> u8 {
-        match self.socket.state() {
+    fn tcp_status(&mut self) -> u8 {
+        self.tcp_poll();
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
+        match socket.state() {
             tcp::State::Closed => 1,
             tcp::State::Listen => 2,
             tcp::State::SynSent => 3,
@@ -272,17 +285,29 @@ impl Actor<'_> {
         }
     }
 
+    fn tcp_poll(&mut self) {
+        let now = esp_hal::time::Instant::now();
+        let now = now.duration_since_epoch().as_micros();
+        #[expect(clippy::cast_possible_wrap)]
+        let now = smoltcp::time::Instant::from_micros(now as i64);
+        self.iface
+            .poll(now, &mut self.wifi_device, &mut self.sockets);
+    }
+
     fn tcp_send(&mut self, data: &[u8]) -> NetworkResult<u8> {
-        let Ok(n) = self.socket.send_slice(data) else {
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
+        let Ok(n) = socket.send_slice(data) else {
             return Err("failed to send TCP data");
         };
-        self.socket.close();
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
+        socket.close();
         #[expect(clippy::cast_possible_truncation)]
         Ok(n as u8)
     }
 
     fn tcp_close(&mut self) {
-        self.socket.abort();
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
+        socket.abort();
     }
 }
 
