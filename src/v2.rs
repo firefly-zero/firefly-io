@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{wifi::WifiManager, *};
 use alloc::vec;
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -13,8 +13,8 @@ use esp_hal::{
 };
 use esp_println::println;
 use firefly_types::{spi::*, Encode};
-use smoltcp::socket::tcp;
-use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr};
+use smoltcp::{iface::SocketSet, socket::tcp};
+use smoltcp::{socket::dhcpv4, wire::EthernetAddress};
 
 pub fn run_v2(peripherals: Peripherals) -> Result<()> {
     println!("starting RTOS scheduler...");
@@ -68,21 +68,24 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
     let addr = EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
     let config = smoltcp::iface::Config::new(addr.into());
     let now = smoltcp::time::Instant::from_micros(1);
-    let mut iface = smoltcp::iface::Interface::new(config, &mut device, now);
-    iface.update_ip_addrs(|ip_addrs| {
-        ip_addrs
-            .push(IpCidr::new(IpAddress::v4(192, 168, 69, 1), 24))
-            .unwrap();
-    });
-    iface
-        .routes_mut()
-        .add_default_ipv4_route(core::net::Ipv4Addr::new(192, 168, 69, 100))
-        .unwrap();
+    let iface = smoltcp::iface::Interface::new(config, &mut device, now);
     let rbuf = tcp::SocketBuffer::new(vec![0; 1024]);
     let tbuf = tcp::SocketBuffer::new(vec![0; 1024]);
     let tcp_socket = tcp::Socket::new(rbuf, tbuf);
+    let dhcp_socket = dhcpv4::Socket::new();
+    let mut sockets = SocketSet::new(alloc::vec::Vec::new());
+    let tcp_ref = sockets.add(tcp_socket);
+    let dhcp_ref = sockets.add(dhcp_socket);
+    let wifi = WifiManager {
+        controller: wifi,
+        sockets,
+        tcp_ref,
+        dhcp_ref,
+        iface,
+        device,
+    };
 
-    let mut actor = Actor::new(wifi, esp_now, pad, buttons, tcp_socket, iface, device);
+    let mut actor = Actor::new(esp_now, pad, buttons, wifi);
 
     println!("configuring main SPI...");
     let mut uart_main = {

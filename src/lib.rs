@@ -17,6 +17,7 @@ mod net;
 pub mod retries;
 mod v1;
 mod v2;
+mod wifi;
 
 pub use actor::*;
 pub use error::ErrPrinter;

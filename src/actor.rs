@@ -1,8 +1,5 @@
-use crate::retries;
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-};
+use crate::{retries, wifi::WifiManager};
+use alloc::{boxed::Box, string::String};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -13,14 +10,8 @@ use esp_hal::{
     Blocking,
 };
 use esp_println::println;
-use esp_radio::wifi::{PowerSaveMode, WifiController, WifiDevice, WifiError};
-use esp_radio::{esp_now::*, wifi::ScanConfig};
+use esp_radio::esp_now::*;
 use firefly_types::spi::*;
-use smoltcp::{
-    iface::SocketHandle,
-    wire::{IpAddress, IpEndpoint},
-};
-use smoltcp::{iface::SocketSet, socket::tcp};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
@@ -42,40 +33,27 @@ pub enum RespBuf<'a> {
 
 pub struct Actor<'a> {
     pad: Touchpad<PadSpi<'a>, Absolute>,
-    wifi: WifiController<'a>,
     manager: EspNowManager<'a>,
     receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
-    sockets: SocketSet<'a>,
-    socket_ref: SocketHandle,
-    iface: smoltcp::iface::Interface,
-    wifi_device: WifiDevice<'a>,
+    wifi: WifiManager<'a>,
 }
 
 impl<'a> Actor<'a> {
     #[must_use]
     pub fn new(
-        wifi: WifiController<'a>,
         esp_now: EspNow<'a>,
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
-        socket: tcp::Socket<'a>,
-        iface: smoltcp::iface::Interface,
-        wifi_device: WifiDevice<'a>,
+        wifi: WifiManager<'a>,
     ) -> Self {
         let (manager, _sender, receiver) = esp_now.split();
-        let mut sockets = SocketSet::new(alloc::vec::Vec::new());
-        let socket_ref = sockets.add(socket);
         let mut actor = Self {
             pad,
-            wifi,
             manager,
             receiver,
             buttons,
-            sockets,
-            socket_ref,
-            iface,
-            wifi_device,
+            wifi,
         };
         _ = actor.stop();
         actor
@@ -126,35 +104,35 @@ impl<'a> Actor<'a> {
                 Response::Input(input.0, input.1)
             }
             Request::WifiScan => {
-                let ssids = self.wifi_scan()?;
+                let ssids = self.wifi.scan()?;
                 return Ok(RespBuf::Scan(ssids));
             }
             Request::WifiConnect(ssid, pass) => {
-                self.wifi_connect(ssid, pass)?;
+                self.wifi.connect(ssid, pass)?;
                 Response::WifiConnected
             }
             Request::WifiStatus => {
-                let status = self.wifi_status()?;
+                let status = self.wifi.status()?;
                 Response::WifiStatus(status)
             }
             Request::WifiDisconnect => {
-                self.wifi_disconnect()?;
+                self.wifi.disconnect()?;
                 Response::WifiDisconnected
             }
             Request::TcpConnect(ip, port) => {
-                self.tcp_connect(ip, port)?;
+                self.wifi.tcp_connect(ip, port)?;
                 Response::TcpConnected
             }
             Request::TcpStatus => {
-                let status = self.tcp_status();
+                let status = self.wifi.tcp_status();
                 Response::TcpStatus(status)
             }
             Request::TcpSend(data) => {
-                self.tcp_send(data)?;
+                self.wifi.tcp_send(data)?;
                 Response::TcpSent
             }
             Request::TcpClose => {
-                self.tcp_close();
+                self.wifi.tcp_close();
                 Response::TcpClosed
             }
         };
@@ -184,137 +162,10 @@ impl<'a> Actor<'a> {
 pub type Addr = [u8; 6];
 type NetworkResult<T> = Result<T, &'static str>;
 
-// WiFi- and TCP-related methods.
-impl Actor<'_> {
-    fn wifi_start(&mut self) -> NetworkResult<()> {
-        let res = self.wifi.set_power_saving(PowerSaveMode::None);
-        if res.is_err() {
-            return Err("failed to exit power saving mode");
-        }
-        if !self.wifi.is_started().unwrap_or_default() {
-            let res = self.wifi.start();
-            if res.is_err() {
-                return Err("failed to start wifi");
-            }
-        }
-        Ok(())
-    }
-
-    fn wifi_scan(&mut self) -> NetworkResult<[String; 6]> {
-        self.wifi_start()?;
-        let config = ScanConfig::default().with_max(6);
-        let Ok(points) = self.wifi.scan_with_config(config) else {
-            return Err("failed to scan for networks");
-        };
-        let mut ssids = [const { String::new() }; 6];
-        for (i, point) in points.into_iter().enumerate() {
-            ssids[i] = point.ssid;
-        }
-        Ok(ssids)
-    }
-
-    fn wifi_connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
-        use esp_radio::wifi::*;
-        let config = ClientConfig::default()
-            .with_ssid(ssid.to_string())
-            .with_password(pass.to_string());
-        let config = ModeConfig::Client(config);
-        let res = self.wifi.set_config(&config);
-        if res.is_err() {
-            return Err("failed to set wifi config");
-        }
-        let res = self.wifi.connect();
-        if res.is_err() {
-            return Err("failed to connect to wifi");
-        }
-        Ok(())
-    }
-
-    fn wifi_status(&self) -> NetworkResult<u8> {
-        match self.wifi.is_connected() {
-            Ok(true) => Ok(1),
-            Err(WifiError::Disconnected) => Ok(2),
-            Ok(false) => Ok(3),
-            Err(_) => Err("failed to connect to wifi"),
-        }
-    }
-
-    fn wifi_disconnect(&mut self) -> NetworkResult<()> {
-        let res = self.wifi.disconnect();
-        if res.is_err() {
-            return Err("failed to disconnect from wifi");
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    fn tcp_connect(&mut self, ip: u32, port: u16) -> NetworkResult<()> {
-        let cx = self.iface.context();
-        let addr = IpAddress::v4(
-            (ip >> 24) as u8,
-            (ip >> 16) as u8,
-            (ip >> 8) as u8,
-            ip as u8,
-        );
-        let remote_endpoint = IpEndpoint::new(addr, port);
-        // TODO: Random port (49152 + rand() % 16384)
-        let local_endpoint = 49153;
-        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
-        let res = socket.connect(cx, remote_endpoint, local_endpoint);
-        if res.is_err() {
-            return Err("failed to connect to the TCP endpoint");
-        }
-        Ok(())
-    }
-
-    fn tcp_status(&mut self) -> u8 {
-        self.tcp_poll();
-        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
-        match socket.state() {
-            tcp::State::Closed => 1,
-            tcp::State::Listen => 2,
-            tcp::State::SynSent => 3,
-            tcp::State::SynReceived => 4,
-            tcp::State::Established => 5,
-            tcp::State::FinWait1 => 6,
-            tcp::State::FinWait2 => 7,
-            tcp::State::CloseWait => 8,
-            tcp::State::Closing => 9,
-            tcp::State::LastAck => 10,
-            tcp::State::TimeWait => 11,
-        }
-    }
-
-    fn tcp_poll(&mut self) {
-        let now = esp_hal::time::Instant::now();
-        let now = now.duration_since_epoch().as_micros();
-        #[expect(clippy::cast_possible_wrap)]
-        let now = smoltcp::time::Instant::from_micros(now as i64);
-        self.iface
-            .poll(now, &mut self.wifi_device, &mut self.sockets);
-    }
-
-    fn tcp_send(&mut self, data: &[u8]) -> NetworkResult<u8> {
-        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
-        let Ok(n) = socket.send_slice(data) else {
-            return Err("failed to send TCP data");
-        };
-        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
-        socket.close();
-        #[expect(clippy::cast_possible_truncation)]
-        Ok(n as u8)
-    }
-
-    fn tcp_close(&mut self) {
-        let socket: &mut tcp::Socket = self.sockets.get_mut(self.socket_ref);
-        socket.abort();
-    }
-}
-
 // Input- and Multiplayer-related methods.
 impl Actor<'_> {
     fn start(&mut self) -> NetworkResult<()> {
-        self.wifi_start()?;
+        self.wifi.start()?;
         let res = self.manager.set_channel(6);
         if res.is_err() {
             return Err("failed to set esp-wifi channel");
@@ -331,10 +182,7 @@ impl Actor<'_> {
     }
 
     fn stop(&mut self) -> NetworkResult<()> {
-        let res = self.wifi.stop();
-        if res.is_err() {
-            return Err("failed to stop wifi");
-        }
+        self.wifi.stop()?;
         loop {
             let Ok(peer) = self.manager.fetch_peer(true) else {
                 break;
