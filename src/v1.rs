@@ -1,5 +1,4 @@
 use crate::{wifi::WifiManager, *};
-use alloc::vec;
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
@@ -13,11 +12,6 @@ use esp_hal::{
 };
 use esp_println::println;
 use firefly_types::{spi::*, Encode};
-use smoltcp::wire::EthernetAddress;
-use smoltcp::{
-    iface::SocketSet,
-    socket::{dhcpv4, tcp},
-};
 
 pub fn run_v1(peripherals: Peripherals) -> Result<()> {
     println!("starting RTOS scheduler...");
@@ -67,26 +61,7 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
     };
 
     println!("configuring TCP/IP stack...");
-    let mut device = interfaces.sta;
-    let addr = EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
-    let config = smoltcp::iface::Config::new(addr.into());
-    let now = smoltcp::time::Instant::from_micros(1);
-    let iface = smoltcp::iface::Interface::new(config, &mut device, now);
-    let rbuf = tcp::SocketBuffer::new(vec![0; 1024]);
-    let tbuf = tcp::SocketBuffer::new(vec![0; 1024]);
-    let tcp_socket = tcp::Socket::new(rbuf, tbuf);
-    let dhcp_socket = dhcpv4::Socket::new();
-    let mut sockets = SocketSet::new(alloc::vec::Vec::new());
-    let tcp_ref = sockets.add(tcp_socket);
-    let dhcp_ref = sockets.add(dhcp_socket);
-    let wifi = WifiManager {
-        controller: wifi,
-        sockets,
-        tcp_ref,
-        dhcp_ref,
-        iface,
-        device,
-    };
+    let wifi = WifiManager::new(interfaces.sta, wifi);
 
     let mut actor = Actor::new(esp_now, pad, buttons, wifi);
 

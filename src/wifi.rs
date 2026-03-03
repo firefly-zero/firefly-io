@@ -1,9 +1,12 @@
-use alloc::string::{String, ToString};
+use alloc::{
+    string::{String, ToString},
+    vec,
+};
 use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, WifiError};
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
-    socket::tcp,
-    wire::{IpAddress, IpEndpoint},
+    socket::{dhcpv4, tcp},
+    wire::{EthernetAddress, IpAddress, IpEndpoint},
 };
 
 pub struct WifiManager<'a> {
@@ -18,7 +21,30 @@ pub struct WifiManager<'a> {
 type NetworkResult<T> = Result<T, &'static str>;
 
 // WiFi- and TCP-related methods.
-impl WifiManager<'_> {
+impl<'a> WifiManager<'a> {
+    pub fn new(device: WifiDevice<'a>, controller: WifiController<'a>) -> Self {
+        let mut device = device;
+        let addr = EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        let config = smoltcp::iface::Config::new(addr.into());
+        let now = smoltcp::time::Instant::from_micros(1);
+        let iface = smoltcp::iface::Interface::new(config, &mut device, now);
+        let rbuf = tcp::SocketBuffer::new(vec![0; 1024]);
+        let tbuf = tcp::SocketBuffer::new(vec![0; 1024]);
+        let tcp_socket = tcp::Socket::new(rbuf, tbuf);
+        let dhcp_socket = dhcpv4::Socket::new();
+        let mut sockets = SocketSet::new(alloc::vec::Vec::new());
+        let tcp_ref = sockets.add(tcp_socket);
+        let dhcp_ref = sockets.add(dhcp_socket);
+        Self {
+            controller,
+            sockets,
+            tcp_ref,
+            dhcp_ref,
+            iface,
+            device,
+        }
+    }
+
     pub fn start(&mut self) -> NetworkResult<()> {
         let res = self.controller.set_power_saving(PowerSaveMode::None);
         if res.is_err() {
