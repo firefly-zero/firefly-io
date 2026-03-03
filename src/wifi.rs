@@ -1,7 +1,6 @@
-use alloc::{
-    string::{String, ToString},
-    vec,
-};
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use alloc::vec;
 use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, WifiError};
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -46,6 +45,9 @@ impl<'a> WifiManager<'a> {
         }
     }
 
+    /// Ensure the wifi controller is started.
+    ///
+    /// Must be called before connecting to an AP or starting esp-now.
     pub fn start(&mut self) -> NetworkResult<()> {
         let res = self.controller.set_power_saving(PowerSaveMode::None);
         if res.is_err() {
@@ -60,6 +62,7 @@ impl<'a> WifiManager<'a> {
         Ok(())
     }
 
+    /// Stop the wifi controller to save energy.
     pub fn stop(&mut self) -> NetworkResult<()> {
         let res = self.controller.stop();
         if res.is_err() {
@@ -76,6 +79,15 @@ impl<'a> WifiManager<'a> {
         self.iface.poll(now, &mut self.device, &mut self.sockets);
     }
 
+    /// Scan for available wifi Access Points.
+    ///
+    /// Performs an active scan: switches to every channel in order,
+    /// sends a beacon, and waits for a response for 10-20ms.
+    ///
+    /// Returns the first 6 APs that it can find. Usually these are
+    /// the points with the strongest signal but not necessarily.
+    /// Scan again and the list might be slightly different.
+    /// The limitation comes from the max packet size in our SPI implementation.
     pub fn scan(&mut self) -> NetworkResult<[String; 6]> {
         self.start()?;
         let config = ScanConfig::default().with_max(6);
@@ -89,6 +101,13 @@ impl<'a> WifiManager<'a> {
         Ok(ssids)
     }
 
+    /// Connect to the given wifi Access Point.
+    ///
+    /// Non-blocking. Check the status to see if connected.
+    ///
+    /// * Auth method: WPA-2 PSK.
+    /// * Protocol: 802.11b, 802.11b/g, 802.11b/g/n.
+    /// * Channel: auto-detected
     pub fn connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
         use esp_radio::wifi::*;
         let config = ClientConfig::default()
@@ -106,6 +125,11 @@ impl<'a> WifiManager<'a> {
         Ok(())
     }
 
+    /// Get the wifi/DHCP connection status.
+    ///
+    /// Since "connect" is non-blocking and esp-radio doesn't provide
+    /// status for failed connection (only "disconnected"), make sure
+    /// to ignore "disconnected" status for a while after calling "connect".
     pub fn status(&mut self) -> NetworkResult<u8> {
         match self.controller.is_connected() {
             Ok(false) => Ok(1),
@@ -123,6 +147,7 @@ impl<'a> WifiManager<'a> {
         }
     }
 
+    /// Disconnect from the wifi Access Point.
     pub fn disconnect(&mut self) -> NetworkResult<()> {
         let res = self.controller.disconnect();
         if res.is_err() {
@@ -207,6 +232,19 @@ impl<'a> WifiManager<'a> {
         socket.close();
         #[expect(clippy::cast_possible_truncation)]
         Ok(n as u8)
+    }
+
+    pub fn tcp_recv(&mut self) -> NetworkResult<Box<[u8]>> {
+        let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
+        if !socket.may_recv() {
+            return Err("trying to read from dead TCP connection");
+        }
+        let mut buf = vec![0; 160];
+        let Ok(n) = socket.recv_slice(&mut buf) else {
+            return Err("failed to read incoming TCP data");
+        };
+        buf.truncate(n);
+        Ok(buf.into_boxed_slice())
     }
 
     pub fn tcp_close(&mut self) {

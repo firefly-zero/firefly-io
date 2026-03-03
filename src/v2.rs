@@ -94,6 +94,10 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
                 let resp = Response::NetIncoming(addr, &msg);
                 send_resp(&mut uart_main, buf, resp)?;
             }
+            RespBuf::TcpChunk(data) => {
+                let resp = Response::TcpChunk(&data);
+                send_resp(&mut uart_main, buf, resp)?;
+            }
             RespBuf::Scan(ssids) => {
                 let ssids = [
                     ssids[0].as_str(),

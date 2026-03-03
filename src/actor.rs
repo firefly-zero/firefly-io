@@ -29,6 +29,7 @@ pub enum RespBuf<'a> {
     Response(Response<'a>),
     Incoming([u8; 6], Box<[u8]>),
     Scan([String; 6]),
+    TcpChunk(Box<[u8]>),
 }
 
 pub struct Actor<'a> {
@@ -130,6 +131,10 @@ impl<'a> Actor<'a> {
             Request::TcpSend(data) => {
                 self.wifi.tcp_send(data)?;
                 Response::TcpSent
+            }
+            Request::TcpRecv => {
+                let data = self.wifi.tcp_recv()?;
+                return Ok(RespBuf::TcpChunk(data));
             }
             Request::TcpClose => {
                 self.wifi.tcp_close();
