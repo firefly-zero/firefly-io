@@ -239,7 +239,7 @@ impl<'a> WifiManager<'a> {
         if !socket.may_recv() {
             return Err("trying to read from dead TCP connection");
         }
-        let mut buf = vec![0; 160];
+        let mut buf = vec![0; 80];
         let Ok(n) = socket.recv_slice(&mut buf) else {
             return Err("failed to read incoming TCP data");
         };
