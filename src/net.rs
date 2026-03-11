@@ -1,3 +1,4 @@
+use crate::RespBuf;
 use anyhow::{Context, Result};
 use esp_backtrace as _;
 use esp_hal::{uart::Uart, Blocking};
@@ -5,7 +6,36 @@ use esp_println::println;
 use firefly_types::{spi::*, Encode};
 
 /// Serialize response and write it into UART.
-pub fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) -> Result<()> {
+pub fn send_resp_buf(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: RespBuf) -> Result<()> {
+    match resp {
+        RespBuf::Response(resp) => {
+            send_resp(uart, buf, resp)?;
+        }
+        RespBuf::Incoming(addr, msg) => {
+            let resp = Response::NetIncoming(addr, &msg);
+            send_resp(uart, buf, resp)?;
+        }
+        RespBuf::TcpChunk(data) => {
+            let resp = Response::TcpChunk(&data);
+            send_resp(uart, buf, resp)?;
+        }
+        RespBuf::Scan(ssids) => {
+            let ssids = [
+                ssids[0].as_str(),
+                ssids[1].as_str(),
+                ssids[2].as_str(),
+                ssids[3].as_str(),
+                ssids[4].as_str(),
+                ssids[5].as_str(),
+            ];
+            let resp = Response::WifiScan(ssids);
+            send_resp(uart, buf, resp)?;
+        }
+    }
+    Ok(())
+}
+
+fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) -> Result<()> {
     if resp == Response::NetSent {
         return Ok(());
     }

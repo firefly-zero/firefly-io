@@ -88,30 +88,7 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
         uart_main.read_exact(&mut buf[..size]).unwrap();
         let req = Request::decode(&buf[..size]).context("decode request")?;
 
-        match actor.handle(req) {
-            RespBuf::Response(resp) => {
-                send_resp(&mut uart_main, buf, resp)?;
-            }
-            RespBuf::Incoming(addr, msg) => {
-                let resp = Response::NetIncoming(addr, &msg);
-                send_resp(&mut uart_main, buf, resp)?;
-            }
-            RespBuf::TcpChunk(data) => {
-                let resp = Response::TcpChunk(&data);
-                send_resp(&mut uart_main, buf, resp)?;
-            }
-            RespBuf::Scan(ssids) => {
-                let ssids = [
-                    ssids[0].as_str(),
-                    ssids[1].as_str(),
-                    ssids[2].as_str(),
-                    ssids[3].as_str(),
-                    ssids[4].as_str(),
-                    ssids[5].as_str(),
-                ];
-                let resp = Response::WifiScan(ssids);
-                send_resp(&mut uart_main, buf, resp)?;
-            }
-        }
+        let resp = actor.handle(req);
+        send_resp_buf(&mut uart_main, buf, resp)?;
     }
 }
