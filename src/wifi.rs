@@ -110,6 +110,7 @@ impl<'a> WifiManager<'a> {
     /// * Channel: auto-detected
     pub fn connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
         use esp_radio::wifi::*;
+        self.start()?;
         let config = ClientConfig::default()
             .with_ssid(ssid.to_string())
             .with_password(pass.to_string());
@@ -143,7 +144,7 @@ impl<'a> WifiManager<'a> {
                     Ok(4)
                 }
             }
-            Err(_) => Err("failed to connect to wifi"),
+            Err(_) => Err("failed to read wifi status"),
         }
     }
 
