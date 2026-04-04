@@ -31,7 +31,7 @@ esp-rtos = { version = "0.2.0", features = [
     "esp-alloc",
 ] }
 esp-wifi-sys = "0.8.1"
-firefly-types = "0.8.1"
+firefly-types = "0.9.0"
 portable-atomic = "1.13.1"
 smoltcp = { version = "0.12.0", default-features = false, features = [
     "proto-ipv4",
@@ -40,9 +40,6 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
     "socket-tcp",
     "socket-dhcpv4",
 ] }
-
-[patch.crates-io]
-firefly-types = { path = "../firefly-types" }
 
 [features]
 default = []
