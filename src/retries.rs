@@ -145,12 +145,12 @@ unsafe extern "C" fn send_cb(info: *const esp_now_send_info_t, status: esp_now_s
 const fn cast_addr(ptr: *mut u8) -> Addr {
     unsafe {
         [
-            ptr.offset(0).read(),
-            ptr.offset(1).read(),
-            ptr.offset(2).read(),
-            ptr.offset(3).read(),
-            ptr.offset(4).read(),
-            ptr.offset(5).read(),
+            ptr.read(),
+            ptr.add(1).read(),
+            ptr.add(2).read(),
+            ptr.add(3).read(),
+            ptr.add(4).read(),
+            ptr.add(5).read(),
         ]
     }
 }

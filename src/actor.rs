@@ -188,10 +188,7 @@ impl Actor<'_> {
 
     fn stop(&mut self) -> NetworkResult<()> {
         self.wifi.stop()?;
-        loop {
-            let Ok(peer) = self.manager.fetch_peer(true) else {
-                break;
-            };
+        while let Ok(peer) = self.manager.fetch_peer(true) {
             let res = self.manager.remove_peer(&peer.peer_address);
             if res.is_err() {
                 return Err("peer not found, cannot remove");
