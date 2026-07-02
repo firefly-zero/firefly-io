@@ -2,10 +2,10 @@
 name = "firefly-io"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.91.0"
 
 [dependencies]
-anyhow = { version = "1.0.102", default-features = false }
+anyhow = { version = "1.0.103", default-features = false }
 cirque-pinnacle = "1.0.1"
 critical-section = "1.2.0"
 embedded-hal = { version = "1.0.0" }
@@ -52,6 +52,6 @@ codegen-units = 1        # LLVM can perform better optimizations using a single 
 debug-assertions = false
 incremental = false
 lto = "fat"
-opt-level = "z"          # Optimize for size.
+opt-level = "s"          # Optimize for speed.
 overflow-checks = false
 panic = "abort"
