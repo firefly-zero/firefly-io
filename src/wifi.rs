@@ -1,7 +1,8 @@
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
-use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, WifiError};
+use esp_radio::wifi::Interface as WifiDevice;
+use esp_radio::wifi::{PowerSaveMode, WifiController, WifiError};
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
     socket::{dhcpv4, tcp},

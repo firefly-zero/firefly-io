@@ -5,6 +5,7 @@ use embedded_io::Read;
 use esp_hal::{
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
+    interrupt::software::SoftwareInterruptControl,
     peripherals::Peripherals,
     time::Rate,
     timer::timg::TimerGroup,
@@ -16,15 +17,12 @@ use firefly_types::{spi::*, Encode};
 pub fn run_v2(peripherals: Peripherals) -> Result<()> {
     println!("starting RTOS scheduler...");
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
+    let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     println!("configuring WiFi...");
-    let inited = esp_radio::init().context("init wifi")?;
-    let config = esp_radio::wifi::Config::default();
-    let (mut wifi, interfaces) = esp_radio::wifi::new(&inited, peripherals.WIFI, config)
+    let (mut wifi, interfaces) = esp_radio::wifi::new(peripherals.WIFI, Default::default())
         .context("create wifi controller")?;
-    wifi.set_mode(esp_radio::wifi::WifiMode::Sta)
-        .context("enter sta mode")?;
     let esp_now = interfaces.esp_now;
 
     println!("configuring touchpad...");
@@ -61,7 +59,7 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
     };
 
     println!("configuring TCP/IP stack...");
-    let wifi = WifiManager::new(interfaces.sta, wifi);
+    let wifi = WifiManager::new(interfaces.station, wifi);
 
     let mut actor = Actor::new(esp_now, pad, buttons, wifi);
 
