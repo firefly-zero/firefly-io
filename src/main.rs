@@ -11,6 +11,10 @@ use esp_hal::{clock::CpuClock, delay::Delay, main, system::software_reset};
 use esp_println::println;
 use firefly_io::*;
 
+// https://github.com/esp-rs/espflash/issues/927
+// https://github.com/esp-rs/esp-hal/releases/tag/esp-hal-v1.0.0-rc.0
+esp_bootloader_esp_idf::esp_app_desc!();
+
 #[main]
 fn main() -> ! {
     esp_alloc::heap_allocator!(size: 120 * 1024);
