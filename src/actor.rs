@@ -104,6 +104,11 @@ impl<'a> Actor<'a> {
                 let input = self.read_input()?;
                 Response::Input(input.0, input.1)
             }
+            Request::FirmwareInfo => {
+                let version = get_firmware_version();
+                let partition = 0;
+                Response::FirmwareInfo { version, partition }
+            }
             Request::WifiScan => {
                 let ssids = self.wifi.scan()?;
                 return Ok(RespBuf::Scan(ssids));
@@ -301,4 +306,13 @@ const fn convert_error2(
         },
         embedded_hal_bus::spi::DeviceError::Cs(_) => "spi: asserting or deasserting CS failed",
     }
+}
+
+fn get_firmware_version() -> (u8, u8, u8) {
+    let raw = env!("CARGO_PKG_VERSION");
+    let mut iter = raw.split('.');
+    let major: u8 = iter.next().unwrap().parse().unwrap();
+    let minor: u8 = iter.next().unwrap().parse().unwrap();
+    let patch: u8 = iter.next().unwrap().parse().unwrap();
+    (major, minor, patch)
 }
