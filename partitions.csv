@@ -1,0 +1,15 @@
+# ESP-IDF Partition Table
+# https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/partition-tables.html
+# https://thelastoutpostworkshop.github.io/ESP32PartitionBuilder/
+# Name,   Type, SubType,   Offset,     Size,     Flags
+#
+# initial offset: 36K (reserved for partition table itself)
+nvs,      data, nvs,        0x9000,   16K,
+otadata,  data, ota,        0xd000,    8K,
+phy_init, data, phy,        0xf000,    4K,
+# free space: 64K
+#
+factory,  app,  factory,   0x20000, 2048K,
+ota_0,    app,  ota_0,    0x220000, 2048K,
+ota_1,    app,  ota_1,    0x420000, 2048K,
+# free space: 1920K

@@ -17,7 +17,9 @@ tasks:
       - >
         cargo espflash flash
         --skip-update-check
-        --chip esp32s3
+        --chip                  esp32s3
+        --partition-table       partitions.csv
+        --target-app-partition  factory
         --release
         {{.CLI_ARGS}}
   monitor:
