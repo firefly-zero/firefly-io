@@ -9,12 +9,12 @@ use smoltcp::{
 };
 
 pub struct WifiManager<'a> {
-    pub controller: WifiController<'a>,
-    pub sockets: SocketSet<'a>,
-    pub tcp_ref: SocketHandle,
-    pub dhcp_ref: SocketHandle,
-    pub iface: smoltcp::iface::Interface,
-    pub device: WifiDevice<'a>,
+    controller: WifiController<'a>,
+    sockets: SocketSet<'a>,
+    tcp_ref: SocketHandle,
+    dhcp_ref: SocketHandle,
+    iface: smoltcp::iface::Interface,
+    device: WifiDevice<'a>,
 }
 
 type NetworkResult<T> = Result<T, &'static str>;
