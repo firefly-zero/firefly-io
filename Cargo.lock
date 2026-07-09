@@ -894,6 +894,7 @@ dependencies = [
  "esp-rtos",
  "esp-wifi-sys",
  "firefly-types",
+ "log",
  "portable-atomic",
  "smoltcp",
 ]
@@ -1407,6 +1408,7 @@ dependencies = [
  "cfg-if",
  "defmt 0.3.100",
  "heapless 0.8.0",
+ "log",
  "managed",
 ]
 

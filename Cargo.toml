@@ -41,11 +41,14 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
     "socket-tcp",
     "socket-dhcpv4",
 ] }
+log = { version = "0.4.33", optional = true }
 
 [features]
 default = []
 v1 = []
 v2 = []
+# Enable tracing log output for smoltcp.
+trace = ["dep:log", "smoltcp/log", "esp-println/log-04"]
 
 [profile.release]
 strip = true             # Automatically strip symbols from the binary.

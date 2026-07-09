@@ -18,6 +18,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[main]
 fn main() -> ! {
     esp_alloc::heap_allocator!(size: 120 * 1024);
+    #[cfg(feature = "trace")]
+    esp_println::logger::init_logger(log::LevelFilter::Trace);
     println!("initializing peripherals...");
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
