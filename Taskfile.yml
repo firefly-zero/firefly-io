@@ -8,12 +8,27 @@ tasks:
       - which cargo-espflash
     cmds:
       - cargo install cargo-espflash
+
   build:
+    desc: Build firmware and save it in the firefly-updates directory.
     cmds:
-      - cargo build --release
+      - >
+        cargo espflash save-image
+        --skip-update-check
+        --features v2
+        --chip esp32s3
+        --release
+        {{.CLI_ARGS}}
+        ../firefly-updates/firefly-io
+
   flash:
     cmds:
       - task: install-espflash
+      # Switch OTA to the factory slot
+      - >
+        cargo espflash erase-parts
+        --partition-table partitions.csv
+        otadata
       - >
         cargo espflash flash
         --skip-update-check
