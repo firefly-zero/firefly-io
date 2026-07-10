@@ -90,7 +90,7 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
         uart_main.read_exact(&mut buf[..size]).unwrap();
         let req = Request::decode(&buf[..size]).context("decode request")?;
 
-        let resp = actor.handle(req);
+        let resp = actor.handle(req, &mut uart_main);
         send_resp_buf(&mut uart_main, buf, resp)?;
     }
 }

@@ -70,8 +70,8 @@ impl<'a> Actor<'a> {
         actor
     }
 
-    pub fn handle(&mut self, req: Request) -> RespBuf<'_> {
-        match self.handle_inner(req) {
+    pub fn handle(&mut self, req: Request, uart: &mut Uart<'_, Blocking>) -> RespBuf<'_> {
+        match self.handle_inner(req, uart) {
             Ok(resp) => resp,
             Err(err) => {
                 println!("error: {err:?}");
@@ -80,7 +80,11 @@ impl<'a> Actor<'a> {
         }
     }
 
-    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, &'static str> {
+    fn handle_inner<'b>(
+        &mut self,
+        req: Request,
+        uart: &mut Uart<'_, Blocking>,
+    ) -> Result<RespBuf<'b>, &'static str> {
         let response = match req {
             Request::NetStart => {
                 self.start()?;
@@ -155,7 +159,10 @@ impl<'a> Actor<'a> {
                 self.wifi.tcp_close();
                 Response::TcpClosed
             }
-            Request::PartitionWrite(_, _) => Response::PartitionWritten,
+            Request::PartitionWrite(part, len) => {
+                self.write_partition(part, len, uart)?;
+                Response::PartitionWritten
+            }
             Request::PartitionSwitch(part) => {
                 self.switch_partition(part)?;
                 Response::PartitionSwitched

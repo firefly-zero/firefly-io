@@ -87,14 +87,7 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
         // TODO(@orsinium): don't unwrap
         uart_main.read_exact(&mut buf[..size]).unwrap();
         let req = Request::decode(&buf[..size]).context("decode request")?;
-
-        if let Request::PartitionWrite(part, len) = req {
-            let res = actor.write_partition(part, len, &mut uart_main);
-            if let Err(err) = res {
-                println!("error: {err}");
-            }
-        }
-        let resp = actor.handle(req);
+        let resp = actor.handle(req, &mut uart_main);
         send_resp_buf(&mut uart_main, buf, resp)?;
     }
 }
