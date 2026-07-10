@@ -11,6 +11,7 @@ use esp_hal::{
     uart::Uart,
 };
 use esp_println::println;
+use esp_storage::FlashStorage;
 use firefly_types::{spi::*, Encode};
 
 pub fn run_v1(peripherals: Peripherals) -> Result<()> {
@@ -63,7 +64,8 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
     println!("configuring TCP/IP stack...");
     let wifi = WifiManager::new(interfaces.sta, wifi);
 
-    let mut actor = Actor::new(esp_now, pad, buttons, wifi);
+    let flash = FlashStorage::new(peripherals.FLASH);
+    let mut actor = Actor::new(esp_now, pad, buttons, wifi, flash);
 
     println!("configuring main SPI...");
     let mut uart_main = {

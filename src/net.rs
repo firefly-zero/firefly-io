@@ -36,7 +36,7 @@ pub fn send_resp_buf(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: RespBu
 }
 
 fn send_resp(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: Response<'_>) -> Result<()> {
-    if resp == Response::NetSent {
+    if matches!(resp, Response::NetSent | Response::PartitionWritten) {
         return Ok(());
     }
     let (head, tail) = buf.split_at_mut(1);

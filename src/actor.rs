@@ -3,14 +3,21 @@ use alloc::{boxed::Box, string::String};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use embedded_storage::Storage;
+use esp_bootloader_esp_idf::{
+    ota::Ota,
+    partitions::{read_partition_table, AppPartitionSubType, DataPartitionSubType, PartitionType},
+};
 use esp_hal::{
     delay::Delay,
     gpio::{Input, Output},
     spi::master::Spi,
+    uart::Uart,
     Blocking,
 };
 use esp_println::println;
 use esp_radio::esp_now::*;
+use esp_storage::FlashStorage;
 use firefly_types::spi::*;
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
@@ -38,6 +45,7 @@ pub struct Actor<'a> {
     receiver: EspNowReceiver<'a>,
     buttons: Buttons<'a>,
     wifi: WifiManager<'a>,
+    flash: FlashStorage<'a>,
 }
 
 impl<'a> Actor<'a> {
@@ -47,6 +55,7 @@ impl<'a> Actor<'a> {
         pad: Touchpad<PadSpi<'a>, Absolute>,
         buttons: Buttons<'a>,
         wifi: WifiManager<'a>,
+        flash: FlashStorage<'a>,
     ) -> Self {
         let (manager, _sender, receiver) = esp_now.split();
         let mut actor = Self {
@@ -55,6 +64,7 @@ impl<'a> Actor<'a> {
             receiver,
             buttons,
             wifi,
+            flash,
         };
         _ = actor.stop();
         actor
@@ -145,6 +155,11 @@ impl<'a> Actor<'a> {
                 self.wifi.tcp_close();
                 Response::TcpClosed
             }
+            Request::PartitionWrite(_, _) => Response::PartitionWritten,
+            Request::PartitionSwitch(part) => {
+                self.switch_partition(part)?;
+                Response::PartitionSwitched
+            }
         };
         Ok(RespBuf::Response(response))
     }
@@ -166,6 +181,78 @@ impl<'a> Actor<'a> {
             }
             Err(err) => Err(convert_error2(err)),
         }
+    }
+
+    #[expect(clippy::cast_possible_truncation)]
+    pub fn write_partition(
+        &mut self,
+        part: u8,
+        len: u32,
+        uart: &mut Uart<'_, Blocking>,
+    ) -> Result<(), &'static str> {
+        let mut buf = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
+        let Ok(parts) = read_partition_table(&mut self.flash, &mut buf) else {
+            return Err("failed to read partition table");
+        };
+        let part = match part {
+            0 | 10 => AppPartitionSubType::Factory,
+            1 | 11 => AppPartitionSubType::Ota0,
+            2 | 12 => AppPartitionSubType::Ota1,
+            _ => return Err("selected partition is out of range"),
+        };
+        let Ok(partition) = parts.find_partition(PartitionType::App(part)) else {
+            return Err("cannot read partitions");
+        };
+        let Some(partition) = partition else {
+            return Err("cannot find runtime partition");
+        };
+        let mut storage = partition.as_embedded_storage(&mut self.flash);
+
+        let mut buf = [0u8; 4096];
+        let mut written = 0;
+        while written != len {
+            let left = (len - written) as usize;
+            let chunk_size = buf.len().min(left);
+            let Ok(chunk_size) = uart.read(&mut buf[..chunk_size]) else {
+                return Err("failed to read");
+            };
+            let res = storage.write(written, &buf[..chunk_size]);
+            if res.is_err() {
+                return Err("failed to write firmware into partition");
+            }
+            written += chunk_size as u32;
+        }
+        Ok(())
+    }
+
+    fn switch_partition(&mut self, part: u8) -> Result<(), &'static str> {
+        let mut buf = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
+        let Ok(parts) = read_partition_table(&mut self.flash, &mut buf) else {
+            return Err("failed to read partition table");
+        };
+        let part_type = PartitionType::Data(DataPartitionSubType::Ota);
+        let Ok(ota_part) = parts.find_partition(part_type) else {
+            return Err("cannot read partitions");
+        };
+        let Some(ota_part) = ota_part else {
+            return Err("cannot find OTA data partition");
+        };
+        let mut ota_part = ota_part.as_embedded_storage(&mut self.flash);
+        let Ok(mut ota) = Ota::new(&mut ota_part, 2) else {
+            return Err("OTA partition is invalid");
+        };
+
+        let part = match part {
+            0 => AppPartitionSubType::Factory,
+            1 => AppPartitionSubType::Ota0,
+            2 => AppPartitionSubType::Ota1,
+            _ => panic!(),
+        };
+        let res = ota.set_current_app_partition(part);
+        if res.is_err() {
+            return Err("failed to set OTA partition");
+        }
+        Ok(())
     }
 }
 

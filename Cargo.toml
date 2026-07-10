@@ -31,8 +31,10 @@ esp-rtos = { version = "0.2.0", features = [
     "esp-radio",
     "esp-alloc",
 ] }
+esp-storage = { version = "0.8.1", features = ["esp32s3"] }
+embedded-storage = "0.3.1"
 esp-wifi-sys = "0.8.1"
-firefly-types = "0.11.0"
+firefly-types = "0.11.1"
 portable-atomic = "1.13.1"
 smoltcp = { version = "0.12.0", default-features = false, features = [
     "proto-ipv4",

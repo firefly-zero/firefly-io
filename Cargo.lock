@@ -760,6 +760,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-storage"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1495fc1f5549bdd840b52d9ceb201746200e1620d2636f46958c11e765623b80"
+dependencies = [
+ "document-features",
+ "embedded-storage",
+ "esp-hal",
+ "esp-hal-procmacros",
+ "esp-metadata-generated 0.3.0",
+ "esp-rom-sys",
+ "esp-sync",
+]
+
+[[package]]
 name = "esp-sync"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -885,6 +900,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
+ "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -892,6 +908,7 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-rtos",
+ "esp-storage",
  "esp-wifi-sys",
  "firefly-types",
  "log",
@@ -901,9 +918,9 @@ dependencies = [
 
 [[package]]
 name = "firefly-types"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "404cfd65fc0c437c230d1fb23ad1eba84898ace7331a118f72ab3207b4c90490"
+checksum = "f4328f28f153c7f4a7e0ef2dae9e66039fd55f734a88690deeaabd6b3964b338"
 dependencies = [
  "postcard",
  "serde",
