@@ -1,9 +1,8 @@
-use crate::{retries, send_resp_buf, wifi::WifiManager};
+use crate::{retries, wifi::WifiManager};
 use alloc::{boxed::Box, string::String};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_io::Read;
 use embedded_storage::Storage;
 use esp_bootloader_esp_idf::{
     ota::Ota,
@@ -13,13 +12,12 @@ use esp_hal::{
     delay::Delay,
     gpio::{Input, Output},
     spi::master::Spi,
-    uart::Uart,
     Blocking,
 };
 use esp_println::println;
 use esp_radio::esp_now::*;
 use esp_storage::FlashStorage;
-use firefly_types::{spi::*, Encode};
+use firefly_types::spi::{Request, Response};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
@@ -71,8 +69,8 @@ impl<'a> Actor<'a> {
         actor
     }
 
-    pub fn handle(&mut self, req: Request, uart: &mut Uart<'_, Blocking>) -> RespBuf<'_> {
-        match self.handle_inner(req, uart) {
+    pub fn handle(&mut self, req: Request) -> RespBuf<'_> {
+        match self.handle_inner(req) {
             Ok(resp) => resp,
             Err(err) => {
                 println!("error: {err:?}");
@@ -81,11 +79,7 @@ impl<'a> Actor<'a> {
         }
     }
 
-    fn handle_inner<'b>(
-        &mut self,
-        req: Request,
-        uart: &mut Uart<'_, Blocking>,
-    ) -> Result<RespBuf<'b>, &'static str> {
+    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, &'static str> {
         let response = match req {
             Request::NetStart => {
                 self.start()?;
@@ -121,7 +115,7 @@ impl<'a> Actor<'a> {
             }
             Request::FirmwareInfo => {
                 let version = get_firmware_version();
-                let partition = 0;
+                let partition = self.get_partition()?;
                 Response::FirmwareInfo { version, partition }
             }
             Request::WifiScan => {
@@ -160,12 +154,9 @@ impl<'a> Actor<'a> {
                 self.wifi.tcp_close();
                 Response::TcpClosed
             }
-            Request::PartitionWrite(part, len) => {
-                self.write_partition(part, len, uart)?;
-                Response::PartitionWritten
-            }
-            Request::PartitionChunk(_) => {
-                return Err("unexpected partition chunk");
+            Request::FlashWrite(offset, data) => {
+                _ = self.flash.write(offset, data);
+                Response::FlashWritten
             }
             Request::PartitionSwitch(part) => {
                 self.switch_partition(part)?;
@@ -194,57 +185,32 @@ impl<'a> Actor<'a> {
         }
     }
 
-    #[expect(clippy::cast_possible_truncation)]
-    pub fn write_partition(
-        &mut self,
-        part: u8,
-        len: u32,
-        uart: &mut Uart<'_, Blocking>,
-    ) -> Result<(), &'static str> {
+    fn get_partition(&mut self) -> Result<u8, &'static str> {
         let mut buf = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
         let Ok(parts) = read_partition_table(&mut self.flash, &mut buf) else {
             return Err("failed to read partition table");
         };
-        let part = match part {
-            0 | 10 => AppPartitionSubType::Factory,
-            1 | 11 => AppPartitionSubType::Ota0,
-            2 | 12 => AppPartitionSubType::Ota1,
-            _ => return Err("selected partition is out of range"),
-        };
-        let Ok(partition) = parts.find_partition(PartitionType::App(part)) else {
+        let part_type = PartitionType::Data(DataPartitionSubType::Ota);
+        let Ok(ota_part) = parts.find_partition(part_type) else {
             return Err("cannot read partitions");
         };
-        let Some(partition) = partition else {
-            return Err("cannot find runtime partition");
+        let Some(ota_part) = ota_part else {
+            return Err("cannot find OTA data partition");
         };
-        let mut storage = partition.as_embedded_storage(&mut self.flash);
-
-        let mut buf = [0u8; 4096];
-        let mut written = 0;
-        while written != len {
-            // read request size
-            _ = uart.read(&mut buf[..1]);
-            let size = usize::from(buf[0]);
-
-            // read request payload
-            // TODO(@orsinium): don't unwrap
-            uart.read_exact(&mut buf[..size]).unwrap();
-            let req = Request::decode(&buf[..size]).unwrap();
-
-            let resp = if let Request::PartitionChunk(chunk) = req {
-                let res = storage.write(written, chunk);
-                if res.is_err() {
-                    return Err("failed to write firmware into partition");
-                }
-                written += chunk.len() as u32;
-                Response::PartitionChunk
-            } else {
-                Response::Error("unexpected request, expected partition chunk")
-            };
-            let resp = RespBuf::Response(resp);
-            _ = send_resp_buf(uart, &mut buf, resp);
-        }
-        Ok(())
+        let mut ota_part = ota_part.as_embedded_storage(&mut self.flash);
+        let Ok(mut ota) = Ota::new(&mut ota_part, 2) else {
+            return Err("OTA partition is invalid");
+        };
+        let Ok(part) = ota.current_app_partition() else {
+            return Err("cannot get current partition");
+        };
+        let part = match part {
+            AppPartitionSubType::Factory => 0,
+            AppPartitionSubType::Ota0 => 1,
+            AppPartitionSubType::Ota1 => 2,
+            _ => unreachable!(),
+        };
+        Ok(part)
     }
 
     fn switch_partition(&mut self, part: u8) -> Result<(), &'static str> {

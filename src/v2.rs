@@ -87,7 +87,7 @@ pub fn run_v2(peripherals: Peripherals) -> Result<()> {
         // TODO(@orsinium): don't unwrap
         uart_main.read_exact(&mut buf[..size]).unwrap();
         let req = Request::decode(&buf[..size]).context("decode request")?;
-        let resp = actor.handle(req, &mut uart_main);
+        let resp = actor.handle(req);
         send_resp_buf(&mut uart_main, buf, resp)?;
     }
 }
