@@ -1,8 +1,9 @@
-use crate::{retries, wifi::WifiManager};
+use crate::{retries, send_resp_buf, wifi::WifiManager};
 use alloc::{boxed::Box, string::String};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use embedded_io::Read;
 use embedded_storage::Storage;
 use esp_bootloader_esp_idf::{
     ota::Ota,
@@ -18,7 +19,7 @@ use esp_hal::{
 use esp_println::println;
 use esp_radio::esp_now::*;
 use esp_storage::FlashStorage;
-use firefly_types::spi::*;
+use firefly_types::{spi::*, Encode};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
@@ -163,6 +164,9 @@ impl<'a> Actor<'a> {
                 self.write_partition(part, len, uart)?;
                 Response::PartitionWritten
             }
+            Request::PartitionChunk(_) => {
+                return Err("unexpected partition chunk");
+            }
             Request::PartitionSwitch(part) => {
                 self.switch_partition(part)?;
                 Response::PartitionSwitched
@@ -218,16 +222,27 @@ impl<'a> Actor<'a> {
         let mut buf = [0u8; 4096];
         let mut written = 0;
         while written != len {
-            let left = (len - written) as usize;
-            let chunk_size = buf.len().min(left);
-            let Ok(chunk_size) = uart.read(&mut buf[..chunk_size]) else {
-                return Err("failed to read");
+            // read request size
+            _ = uart.read(&mut buf[..1]);
+            let size = usize::from(buf[0]);
+
+            // read request payload
+            // TODO(@orsinium): don't unwrap
+            uart.read_exact(&mut buf[..size]).unwrap();
+            let req = Request::decode(&buf[..size]).unwrap();
+
+            let resp = if let Request::PartitionChunk(chunk) = req {
+                let res = storage.write(written, chunk);
+                if res.is_err() {
+                    return Err("failed to write firmware into partition");
+                }
+                written += chunk.len() as u32;
+                Response::PartitionChunk
+            } else {
+                Response::Error("unexpected request, expected partition chunk")
             };
-            let res = storage.write(written, &buf[..chunk_size]);
-            if res.is_err() {
-                return Err("failed to write firmware into partition");
-            }
-            written += chunk_size as u32;
+            let resp = RespBuf::Response(resp);
+            _ = send_resp_buf(uart, &mut buf, resp);
         }
         Ok(())
     }
@@ -250,10 +265,10 @@ impl<'a> Actor<'a> {
         };
 
         let part = match part {
-            0 => AppPartitionSubType::Factory,
-            1 => AppPartitionSubType::Ota0,
-            2 => AppPartitionSubType::Ota1,
-            _ => panic!(),
+            0 | 10 => AppPartitionSubType::Factory,
+            1 | 11 => AppPartitionSubType::Ota0,
+            2 | 12 => AppPartitionSubType::Ota1,
+            _ => return Err("selected partition is out of range"),
         };
         let res = ota.set_current_app_partition(part);
         if res.is_err() {
