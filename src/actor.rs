@@ -1,5 +1,6 @@
-use crate::{retries, wifi::WifiManager};
+use crate::{retries, wifi::WifiManager, ErrPrinter};
 use alloc::{boxed::Box, string::String};
+use anyhow::{bail, Result};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
@@ -21,6 +22,7 @@ use firefly_types::spi::{Request, Response};
 
 type PadSpi<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, Delay>;
 type RawInput = (Option<(u16, u16)>, u8);
+pub type Addr = [u8; 6];
 
 pub struct Buttons<'a> {
     pub s: Input<'a>,
@@ -36,6 +38,7 @@ pub enum RespBuf<'a> {
     Incoming([u8; 6], Box<[u8]>),
     Scan([String; 6]),
     TcpChunk(Box<[u8]>),
+    Err(String),
 }
 
 pub struct Actor<'a> {
@@ -73,13 +76,14 @@ impl<'a> Actor<'a> {
         match self.handle_inner(req) {
             Ok(resp) => resp,
             Err(err) => {
+                let err = alloc::format!("{}", ErrPrinter(err));
                 println!("error: {err:?}");
-                RespBuf::Response(Response::Error(err))
+                RespBuf::Err(err)
             }
         }
     }
 
-    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>, &'static str> {
+    fn handle_inner<'b>(&mut self, req: Request) -> Result<RespBuf<'b>> {
         let response = match req {
             Request::NetStart => {
                 self.start()?;
@@ -166,7 +170,7 @@ impl<'a> Actor<'a> {
         Ok(RespBuf::Response(response))
     }
 
-    fn read_input(&mut self) -> Result<RawInput, &'static str> {
+    fn read_input(&mut self) -> Result<RawInput> {
         let buttons = u8::from(self.buttons.s.is_high())
             | u8::from(self.buttons.e.is_high()) << 1
             | u8::from(self.buttons.w.is_high()) << 2
@@ -181,29 +185,21 @@ impl<'a> Actor<'a> {
                 };
                 Ok((pad, buttons))
             }
-            Err(err) => Err(convert_error2(err)),
+            Err(err) => bail!("spi: {}", convert_error(err)),
         }
     }
 
-    fn get_partition(&mut self) -> Result<u8, &'static str> {
+    fn get_partition(&mut self) -> Result<u8> {
         let mut buf = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
-        let Ok(parts) = read_partition_table(&mut self.flash, &mut buf) else {
-            return Err("failed to read partition table");
-        };
+        let parts = read_partition_table(&mut self.flash, &mut buf)?;
         let part_type = PartitionType::Data(DataPartitionSubType::Ota);
-        let Ok(ota_part) = parts.find_partition(part_type) else {
-            return Err("cannot read partitions");
-        };
+        let ota_part = parts.find_partition(part_type)?;
         let Some(ota_part) = ota_part else {
-            return Err("cannot find OTA data partition");
+            bail!("cannot find OTA data partition");
         };
         let mut ota_part = ota_part.as_embedded_storage(&mut self.flash);
-        let Ok(mut ota) = Ota::new(&mut ota_part, 2) else {
-            return Err("OTA partition is invalid");
-        };
-        let Ok(part) = ota.current_app_partition() else {
-            return Err("cannot get current partition");
-        };
+        let mut ota = Ota::new(&mut ota_part, 2)?;
+        let part = ota.current_app_partition()?;
         let part = match part {
             AppPartitionSubType::Factory => 0,
             AppPartitionSubType::Ota0 => 1,
@@ -213,71 +209,41 @@ impl<'a> Actor<'a> {
         Ok(part)
     }
 
-    fn switch_partition(&mut self, part: u8) -> Result<(), &'static str> {
+    fn switch_partition(&mut self, part: u8) -> Result<()> {
         let mut buf = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
-        let Ok(parts) = read_partition_table(&mut self.flash, &mut buf) else {
-            return Err("failed to read partition table");
-        };
+        let parts = read_partition_table(&mut self.flash, &mut buf)?;
         let part_type = PartitionType::Data(DataPartitionSubType::Ota);
-        let Ok(ota_part) = parts.find_partition(part_type) else {
-            return Err("cannot read partitions");
-        };
+        let ota_part = parts.find_partition(part_type)?;
         let Some(ota_part) = ota_part else {
-            return Err("cannot find OTA data partition");
+            bail!("cannot find OTA data partition");
         };
         let mut ota_part = ota_part.as_embedded_storage(&mut self.flash);
-        let Ok(mut ota) = Ota::new(&mut ota_part, 2) else {
-            return Err("OTA partition is invalid");
-        };
+        let mut ota = Ota::new(&mut ota_part, 2)?;
 
         let part = match part {
             0 | 10 => AppPartitionSubType::Factory,
             1 | 11 => AppPartitionSubType::Ota0,
             2 | 12 => AppPartitionSubType::Ota1,
-            _ => return Err("selected partition is out of range"),
+            _ => bail!("selected partition is out of range"),
         };
-        let res = ota.set_current_app_partition(part);
-        if res.is_err() {
-            return Err("failed to set OTA partition");
-        }
+        ota.set_current_app_partition(part)?;
         Ok(())
     }
-}
 
-pub type Addr = [u8; 6];
-type NetworkResult<T> = Result<T, &'static str>;
-
-// Input- and Multiplayer-related methods.
-impl Actor<'_> {
-    fn start(&mut self) -> NetworkResult<()> {
+    fn start(&mut self) -> Result<()> {
         self.wifi.start()?;
-        let res = self.manager.set_channel(6);
-        if res.is_err() {
-            return Err("failed to set esp-wifi channel");
-        }
-        // let res = self.manager.set_rate(WifiPhyRate::Rate54m);
-        // if res.is_err() {
-        //     return Err("failed to set esp-wifi rate");
-        // }
-        let res = retries::start();
-        if let Err(err) = res {
-            return Err(convert_error(err));
-        }
+        self.manager.set_channel(6)?;
+        // self.manager.set_rate(WifiPhyRate::Rate54m)?;
+        retries::start()?;
         Ok(())
     }
 
-    fn stop(&mut self) -> NetworkResult<()> {
+    fn stop(&mut self) -> Result<()> {
         self.wifi.stop()?;
         while let Ok(peer) = self.manager.fetch_peer(true) {
-            let res = self.manager.remove_peer(&peer.peer_address);
-            if res.is_err() {
-                return Err("peer not found, cannot remove");
-            }
+            self.manager.remove_peer(&peer.peer_address)?;
         }
-        let res = retries::stop();
-        if let Err(err) = res {
-            return Err(convert_error(err));
-        }
+        retries::stop()?;
         Ok(())
     }
 
@@ -289,7 +255,7 @@ impl Actor<'_> {
         Self::send(BROADCAST_ADDRESS, b"HELLO");
     }
 
-    fn recv(&self) -> NetworkResult<Option<(Addr, Box<[u8]>)>> {
+    fn recv(&self) -> Result<Option<(Addr, Box<[u8]>)>> {
         let Some(packet) = self.receiver.receive() else {
             return Ok(None);
         };
@@ -297,16 +263,14 @@ impl Actor<'_> {
         let known_peer = self.manager.peer_exists(&packet.info.src_address);
         if !known_peer {
             if packet.data() == b"HELLO" {
-                let res = self.manager.add_peer(PeerInfo {
+                let peer = PeerInfo {
                     peer_address: packet.info.src_address,
                     lmk: None,
                     channel: None,
                     encrypt: false,
                     interface: EspNowWifiInterface::Sta,
-                });
-                if let Err(err) = res {
-                    return Err(convert_error(err));
-                }
+                };
+                self.manager.add_peer(peer)?;
             } else {
                 return Ok(None);
             }
@@ -322,64 +286,31 @@ impl Actor<'_> {
     }
 }
 
-const fn convert_error(value: esp_radio::esp_now::EspNowError) -> &'static str {
-    use esp_radio::esp_now::EspNowError;
-    match value {
-        EspNowError::Error(error) => match error {
-            esp_radio::esp_now::Error::NotInitialized => "esp-now: not initialized",
-            esp_radio::esp_now::Error::InvalidArgument => "esp-now: invalid argument",
-            esp_radio::esp_now::Error::OutOfMemory => {
-                "esp-now: insufficient memory to complete the operation"
-            }
-            esp_radio::esp_now::Error::PeerListFull => "esp-now: peer list is full",
-            esp_radio::esp_now::Error::NotFound => "esp-now: peer is not found",
-            esp_radio::esp_now::Error::Internal => "esp-now: internal error",
-            esp_radio::esp_now::Error::PeerExists => "esp-now: peer already exists",
-            esp_radio::esp_now::Error::InterfaceMismatch => "esp-now: interface mismatch",
-            esp_radio::esp_now::Error::Other(_) => "esp-now: unknown error",
-        },
-        EspNowError::SendFailed => "esp-now: failed to send message",
-        EspNowError::DuplicateInstance => "esp-now: duplicate instance",
-        EspNowError::Initialization(error) => match error {
-            esp_radio::wifi::WifiError::NotInitialized => "wifi init: not initialized",
-            esp_radio::wifi::WifiError::InternalError(_) => "wifi init: internal error",
-            esp_radio::wifi::WifiError::Disconnected => "wifi init: disconnected",
-            esp_radio::wifi::WifiError::UnknownWifiMode => "wifi init: unknown WiFi mode",
-            esp_radio::wifi::WifiError::Unsupported => "wifi init: unsupported",
-            _ => "wifi init: unknown error",
-        },
-    }
-}
-
-const fn convert_error2(
+const fn convert_error(
     value: embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, Infallible>,
 ) -> &'static str {
     use esp_hal::dma::DmaError;
-    match value {
-        embedded_hal_bus::spi::DeviceError::Spi(err) => match err {
-            esp_hal::spi::Error::DmaError(err) => match err {
-                DmaError::InvalidAlignment(_) => "spi: dmi: invalid alignment",
-                DmaError::OutOfDescriptors => "spi: dmi: out of descriptors",
-                DmaError::DescriptorError => "spi: dmi: descriptor error",
-                DmaError::Overflow => "spi: dmi: overflow",
-                DmaError::BufferTooSmall => "spi: dmi: buffer too small",
-                DmaError::UnsupportedMemoryRegion => "spi: dmi: unsupported_memory_region",
-                DmaError::InvalidChunkSize => "spi: dmi: invalid chunk size",
-                DmaError::Late => "spi: dmi: late",
-            },
-            esp_hal::spi::Error::MaxDmaTransferSizeExceeded => {
-                "the maximum DMA transfer size was exceeded"
-            }
-            esp_hal::spi::Error::FifoSizeExeeded => {
-                "the FIFO size was exceeded during SPI communication"
-            }
-            esp_hal::spi::Error::Unsupported => "spi: the operation is unsupported",
-            esp_hal::spi::Error::Unknown => {
-                "spi: an unknown error occurred during SPI communication"
-            }
-            _ => "spi: unknown error",
+    let embedded_hal_bus::spi::DeviceError::Spi(err) = value;
+    match err {
+        esp_hal::spi::Error::DmaError(err) => match err {
+            DmaError::InvalidAlignment(_) => "dmi: invalid alignment",
+            DmaError::OutOfDescriptors => "dmi: out of descriptors",
+            DmaError::DescriptorError => "dmi: descriptor error",
+            DmaError::Overflow => "dmi: overflow",
+            DmaError::BufferTooSmall => "dmi: buffer too small",
+            DmaError::UnsupportedMemoryRegion => "dmi: unsupported_memory_region",
+            DmaError::InvalidChunkSize => "dmi: invalid chunk size",
+            DmaError::Late => "dmi: late",
         },
-        embedded_hal_bus::spi::DeviceError::Cs(_) => "spi: asserting or deasserting CS failed",
+        esp_hal::spi::Error::MaxDmaTransferSizeExceeded => {
+            "the maximum DMA transfer size was exceeded"
+        }
+        esp_hal::spi::Error::FifoSizeExeeded => {
+            "the FIFO size was exceeded during SPI communication"
+        }
+        esp_hal::spi::Error::Unsupported => "the operation is unsupported",
+        esp_hal::spi::Error::Unknown => "unknown error occurred during SPI communication",
+        _ => "unknown error",
     }
 }
 

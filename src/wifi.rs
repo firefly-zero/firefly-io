@@ -1,6 +1,9 @@
+use core::fmt::Display;
+
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
+use anyhow::{bail, Result};
 use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, WifiError};
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
@@ -16,8 +19,6 @@ pub struct WifiManager<'a> {
     iface: smoltcp::iface::Interface,
     device: WifiDevice<'a>,
 }
-
-type NetworkResult<T> = Result<T, &'static str>;
 
 // WiFi- and TCP-related methods.
 impl<'a> WifiManager<'a> {
@@ -48,26 +49,17 @@ impl<'a> WifiManager<'a> {
     /// Ensure the wifi controller is started.
     ///
     /// Must be called before connecting to an AP or starting esp-now.
-    pub fn start(&mut self) -> NetworkResult<()> {
-        let res = self.controller.set_power_saving(PowerSaveMode::None);
-        if res.is_err() {
-            return Err("failed to exit power saving mode");
-        }
+    pub fn start(&mut self) -> Result<()> {
+        self.controller.set_power_saving(PowerSaveMode::None)?;
         if !self.controller.is_started().unwrap_or_default() {
-            let res = self.controller.start();
-            if res.is_err() {
-                return Err("failed to start wifi");
-            }
+            self.controller.start()?;
         }
         Ok(())
     }
 
     /// Stop the wifi controller to save energy.
-    pub fn stop(&mut self) -> NetworkResult<()> {
-        let res = self.controller.stop();
-        if res.is_err() {
-            return Err("failed to stop wifi");
-        }
+    pub fn stop(&mut self) -> Result<()> {
+        self.controller.stop()?;
         Ok(())
     }
 
@@ -88,12 +80,10 @@ impl<'a> WifiManager<'a> {
     /// the points with the strongest signal but not necessarily.
     /// Scan again and the list might be slightly different.
     /// The limitation comes from the max packet size in our SPI implementation.
-    pub fn scan(&mut self) -> NetworkResult<[String; 6]> {
+    pub fn scan(&mut self) -> Result<[String; 6]> {
         self.start()?;
         let config = ScanConfig::default().with_max(6);
-        let Ok(points) = self.controller.scan_with_config(config) else {
-            return Err("failed to scan for networks");
-        };
+        let points = self.controller.scan_with_config(config)?;
         let mut ssids = [const { String::new() }; 6];
         for (i, point) in points.into_iter().enumerate() {
             ssids[i] = point.ssid;
@@ -108,21 +98,15 @@ impl<'a> WifiManager<'a> {
     /// * Auth method: WPA-2 PSK.
     /// * Protocol: 802.11b, 802.11b/g, 802.11b/g/n.
     /// * Channel: auto-detected
-    pub fn connect(&mut self, ssid: &str, pass: &str) -> NetworkResult<()> {
+    pub fn connect(&mut self, ssid: &str, pass: &str) -> Result<()> {
         use esp_radio::wifi::*;
         self.start()?;
         let config = ClientConfig::default()
             .with_ssid(ssid.to_string())
             .with_password(pass.to_string());
         let config = ModeConfig::Client(config);
-        let res = self.controller.set_config(&config);
-        if res.is_err() {
-            return Err("failed to set wifi config");
-        }
-        let res = self.controller.connect();
-        if res.is_err() {
-            return Err("failed to connect to wifi");
-        }
+        self.controller.set_config(&config)?;
+        self.controller.connect()?;
         Ok(())
     }
 
@@ -131,7 +115,7 @@ impl<'a> WifiManager<'a> {
     /// Since "connect" is non-blocking and esp-radio doesn't provide
     /// status for failed connection (only "disconnected"), make sure
     /// to ignore "disconnected" status for a while after calling "connect".
-    pub fn status(&mut self) -> NetworkResult<u8> {
+    pub fn status(&mut self) -> Result<u8> {
         match self.controller.is_connected() {
             Ok(false) => Ok(1),
             Err(WifiError::Disconnected) => Ok(2),
@@ -144,16 +128,13 @@ impl<'a> WifiManager<'a> {
                     Ok(4)
                 }
             }
-            Err(_) => Err("failed to read wifi status"),
+            Err(_) => bail!("failed to read wifi status"),
         }
     }
 
     /// Disconnect from the wifi Access Point.
-    pub fn disconnect(&mut self) -> NetworkResult<()> {
-        let res = self.controller.disconnect();
-        if res.is_err() {
-            return Err("failed to disconnect from wifi");
-        }
+    pub fn disconnect(&mut self) -> Result<()> {
+        self.controller.disconnect()?;
         Ok(())
     }
 
@@ -187,7 +168,7 @@ impl<'a> WifiManager<'a> {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    pub fn tcp_connect(&mut self, ip: u32, port: u16) -> NetworkResult<()> {
+    pub fn tcp_connect(&mut self, ip: u32, port: u16) -> Result<()> {
         let cx = self.iface.context();
         let addr = IpAddress::v4(
             (ip >> 24) as u8,
@@ -199,10 +180,7 @@ impl<'a> WifiManager<'a> {
         // TODO: Random port (49152 + rand() % 16384)
         let local_endpoint = 49153;
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
-        let res = socket.connect(cx, remote_endpoint, local_endpoint);
-        if res.is_err() {
-            return Err("failed to connect to the TCP endpoint");
-        }
+        wrap(socket.connect(cx, remote_endpoint, local_endpoint))?;
         Ok(())
     }
 
@@ -224,26 +202,22 @@ impl<'a> WifiManager<'a> {
         }
     }
 
-    pub fn tcp_send(&mut self, data: &[u8]) -> NetworkResult<u8> {
+    pub fn tcp_send(&mut self, data: &[u8]) -> Result<u8> {
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
-        let Ok(n) = socket.send_slice(data) else {
-            return Err("failed to send TCP data");
-        };
+        let n = wrap(socket.send_slice(data))?;
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
         socket.close();
         #[expect(clippy::cast_possible_truncation)]
         Ok(n as u8)
     }
 
-    pub fn tcp_recv(&mut self) -> NetworkResult<Box<[u8]>> {
+    pub fn tcp_recv(&mut self) -> Result<Box<[u8]>> {
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
         if !socket.may_recv() {
-            return Err("trying to read from dead TCP connection");
+            bail!("trying to read from dead TCP connection");
         }
         let mut buf = vec![0; 80];
-        let Ok(n) = socket.recv_slice(&mut buf) else {
-            return Err("failed to read incoming TCP data");
-        };
+        let n = wrap(socket.recv_slice(&mut buf))?;
         buf.truncate(n);
         Ok(buf.into_boxed_slice())
     }
@@ -251,5 +225,12 @@ impl<'a> WifiManager<'a> {
     pub fn tcp_close(&mut self) {
         let socket: &mut tcp::Socket = self.sockets.get_mut(self.tcp_ref);
         socket.abort();
+    }
+}
+
+fn wrap<T, E: Display>(r: Result<T, E>) -> Result<T> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => bail!("{e}"),
     }
 }

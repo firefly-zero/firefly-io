@@ -11,6 +11,10 @@ pub fn send_resp_buf(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: RespBu
         RespBuf::Response(resp) => {
             send_resp(uart, buf, resp)?;
         }
+        RespBuf::Err(err) => {
+            let resp = Response::Error(&err);
+            send_resp(uart, buf, resp)?;
+        }
         RespBuf::Incoming(addr, msg) => {
             let resp = Response::NetIncoming(addr, &msg);
             send_resp(uart, buf, resp)?;
