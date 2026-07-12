@@ -131,8 +131,8 @@ impl<'a> Actor<'a> {
                 Response::WifiConnected
             }
             Request::WifiStatus => {
-                let status = self.wifi.status()?;
-                Response::WifiStatus(status)
+                let status = self.wifi.status();
+                Response::WifiStatus(status.into())
             }
             Request::WifiDisconnect => {
                 self.wifi.disconnect()?;
@@ -204,7 +204,7 @@ impl<'a> Actor<'a> {
             AppPartitionSubType::Factory => 0,
             AppPartitionSubType::Ota0 => 1,
             AppPartitionSubType::Ota1 => 2,
-            _ => unreachable!(),
+            _ => bail!("unsupported partition"),
         };
         Ok(part)
     }
@@ -315,10 +315,8 @@ const fn convert_error(
 }
 
 fn get_firmware_version() -> (u8, u8, u8) {
-    let raw = env!("CARGO_PKG_VERSION");
-    let mut iter = raw.split('.');
-    let major: u8 = iter.next().unwrap().parse().unwrap();
-    let minor: u8 = iter.next().unwrap().parse().unwrap();
-    let patch: u8 = iter.next().unwrap().parse().unwrap();
+    let major: u8 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+    let minor: u8 = env!("CARGO_PKG_VERSION_MINOR").parse().unwrap();
+    let patch: u8 = env!("CARGO_PKG_VERSION_PATCH").parse().unwrap();
     (major, minor, patch)
 }

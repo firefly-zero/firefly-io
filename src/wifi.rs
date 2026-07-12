@@ -4,12 +4,33 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use anyhow::{bail, Result};
-use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice, WifiError};
+use esp_radio::wifi::event::{EventExt, StaConnected, StaDisconnected, StaStart, StaStop};
+use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice};
+use firefly_types::wifi::Status;
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
     socket::{dhcpv4, tcp},
     wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint},
 };
+
+static mut WIFI_STATUS: Status = Status::Stopped;
+
+/// Register global handlers for wifi connection updates.
+pub fn register_wifi_handlers() {
+    StaConnected::update_handler(|_| {
+        unsafe { WIFI_STATUS = Status::Connected };
+    });
+    StaStart::update_handler(|_| {
+        unsafe { WIFI_STATUS = Status::Started };
+    });
+    StaStop::update_handler(|_| {
+        unsafe { WIFI_STATUS = Status::Stopped };
+    });
+    StaDisconnected::update_handler(|e| {
+        let status = Status::Disconnected(e.reason().into());
+        unsafe { WIFI_STATUS = status };
+    });
+}
 
 pub struct WifiManager<'a> {
     controller: WifiController<'a>,
@@ -50,6 +71,7 @@ impl<'a> WifiManager<'a> {
     ///
     /// Must be called before connecting to an AP or starting esp-now.
     pub fn start(&mut self) -> Result<()> {
+        unsafe { WIFI_STATUS = Status::Started };
         self.controller.set_power_saving(PowerSaveMode::None)?;
         if !self.controller.is_started().unwrap_or_default() {
             self.controller.start()?;
@@ -59,6 +81,7 @@ impl<'a> WifiManager<'a> {
 
     /// Stop the wifi controller to save energy.
     pub fn stop(&mut self) -> Result<()> {
+        unsafe { WIFI_STATUS = Status::Stopped };
         self.controller.stop()?;
         Ok(())
     }
@@ -115,21 +138,16 @@ impl<'a> WifiManager<'a> {
     /// Since "connect" is non-blocking and esp-radio doesn't provide
     /// status for failed connection (only "disconnected"), make sure
     /// to ignore "disconnected" status for a while after calling "connect".
-    pub fn status(&mut self) -> Result<u8> {
-        match self.controller.is_connected() {
-            Ok(false) => Ok(1),
-            Err(WifiError::Disconnected) => Ok(2),
-            Ok(true) => {
-                self.poll();
-                self.dhcp_poll();
-                if self.iface.ip_addrs().is_empty() {
-                    Ok(3)
-                } else {
-                    Ok(4)
-                }
+    pub fn status(&mut self) -> Status {
+        let status = unsafe { WIFI_STATUS };
+        if status == Status::Connected {
+            self.poll();
+            self.dhcp_poll();
+            if self.iface.ip_addrs().is_empty() {
+                return Status::Initializing;
             }
-            Err(_) => bail!("failed to read wifi status"),
         }
+        status
     }
 
     /// Disconnect from the wifi Access Point.

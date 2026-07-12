@@ -1,4 +1,7 @@
-use crate::{wifi::WifiManager, *};
+use crate::{
+    wifi::{register_wifi_handlers, WifiManager},
+    *,
+};
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
@@ -20,6 +23,7 @@ pub fn run_v1(peripherals: Peripherals) -> Result<()> {
     esp_rtos::start(timg0.timer0);
 
     println!("configuring WiFi...");
+    register_wifi_handlers();
     let inited = esp_radio::init().context("init wifi")?;
     let config = esp_radio::wifi::Config::default();
     let (mut wifi, interfaces) = esp_radio::wifi::new(&inited, peripherals.WIFI, config)

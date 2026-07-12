@@ -34,7 +34,7 @@ esp-rtos = { version = "0.2.0", features = [
 esp-storage = { version = "0.8.1", features = ["esp32s3"] }
 embedded-storage = "0.3.1"
 esp-wifi-sys = "0.8.1"
-firefly-types = "0.11.3"
+firefly-types = "0.12.0"
 portable-atomic = "1.13.1"
 smoltcp = { version = "0.12.0", default-features = false, features = [
     "proto-ipv4",
@@ -51,6 +51,9 @@ v1 = []
 v2 = []
 # Enable tracing log output for smoltcp.
 trace = ["dep:log", "smoltcp/log", "esp-println/log-04"]
+
+# [patch.crates-io]
+# firefly-types = { path = "../firefly-types" }
 
 [profile.release]
 strip = true             # Automatically strip symbols from the binary.
