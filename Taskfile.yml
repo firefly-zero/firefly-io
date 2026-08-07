@@ -21,6 +21,18 @@ tasks:
         {{.CLI_ARGS}}
         ../firefly-updates/firefly-io
 
+  release:
+    desc: build and publish release
+    cmds:
+      - task: build
+      - test {{.CLI_ARGS}}
+      - grep -F '"{{.CLI_ARGS}}"' Cargo.toml
+      - git tag {{.CLI_ARGS}}
+      - git push
+      - git push --tags
+      - gh release create --generate-notes {{.CLI_ARGS}}
+      - gh release upload {{.CLI_ARGS}} ../firefly-updates/firefly-io
+
   flash:
     cmds:
       - task: install-espflash
@@ -37,6 +49,7 @@ tasks:
         --target-app-partition  factory
         --release
         {{.CLI_ARGS}}
+
   monitor:
     cmds:
       - task: install-espflash
