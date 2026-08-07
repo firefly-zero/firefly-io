@@ -1,6 +1,6 @@
 [package]
 name = "firefly-io"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.91.0"
 
@@ -47,7 +47,9 @@ log = { version = "0.4.33", optional = true }
 
 [features]
 default = []
+# FOSDEM 2025 prototype.
 v1 = []
+# FOSDEM 2026 prototype.
 v2 = []
 # Enable tracing log output for smoltcp.
 trace = ["dep:log", "smoltcp/log", "esp-println/log-04"]
