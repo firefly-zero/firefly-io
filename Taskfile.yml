@@ -1,7 +1,12 @@
 # https://taskfile.dev
 version: "3"
+
 dotenv:
   - ~/export-esp.sh
+
+vars:
+  IMAGE: ../../apps/firefly-updates/firefly-io
+
 tasks:
   install-espflash:
     status:
@@ -18,8 +23,7 @@ tasks:
         --features v2
         --chip esp32s3
         --release
-        {{.CLI_ARGS}}
-        ../firefly-updates/firefly-io
+        {{.IMAGE}}
 
   release:
     desc: build and publish release
@@ -31,7 +35,9 @@ tasks:
       - git push
       - git push --tags
       - gh release create --generate-notes {{.CLI_ARGS}}
-      - gh release upload {{.CLI_ARGS}} ../firefly-updates/firefly-io
+      - gzip -kfc {{.IMAGE}} > firefly-io.gz
+      - defer: rm firefly-io.gz
+      - gh release upload {{.CLI_ARGS}} firefly-io.gz
 
   flash:
     cmds:
