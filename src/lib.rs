@@ -17,6 +17,7 @@ mod net;
 pub mod retries;
 mod v1;
 mod v2;
+mod v3;
 mod wifi;
 
 pub use actor::*;
@@ -24,3 +25,4 @@ pub use error::ErrPrinter;
 pub(crate) use net::*;
 pub use v1::*;
 pub use v2::*;
+pub use v3::*;

@@ -51,6 +51,8 @@ default = []
 v1 = []
 # FOSDEM 2026 prototype.
 v2 = []
+# Hackfest 2026 prototype.
+v3 = []
 # Enable tracing log output for smoltcp.
 trace = ["dep:log", "smoltcp/log", "esp-println/log-04"]
 
