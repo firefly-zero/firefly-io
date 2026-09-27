@@ -1,9 +1,11 @@
 use crate::RespBuf;
 use anyhow::{Context, Result};
 use esp_backtrace as _;
-use esp_hal::{uart::Uart, Blocking};
+use esp_hal::uart::Uart;
+use esp_hal::Blocking;
 use esp_println::println;
-use firefly_types::{spi::*, Encode};
+use firefly_types::spi::*;
+use firefly_types::Encode;
 
 /// Serialize response and write it into UART.
 pub fn send_resp_buf(uart: &mut Uart<'_, Blocking>, buf: &mut [u8], resp: RespBuf) -> Result<()> {

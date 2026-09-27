@@ -1,17 +1,14 @@
-use core::fmt::Display;
-
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use anyhow::{bail, Result};
+use core::fmt::Display;
 use esp_radio::wifi::event::{EventExt, StaConnected, StaDisconnected, StaStart, StaStop};
 use esp_radio::wifi::{PowerSaveMode, ScanConfig, WifiController, WifiDevice};
 use firefly_types::wifi::Status;
-use smoltcp::{
-    iface::{SocketHandle, SocketSet},
-    socket::{dhcpv4, tcp},
-    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint},
-};
+use smoltcp::iface::{SocketHandle, SocketSet};
+use smoltcp::socket::{dhcpv4, tcp};
+use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint};
 
 static mut WIFI_STATUS: Status = Status::Stopped;
 

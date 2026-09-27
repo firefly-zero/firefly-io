@@ -1,21 +1,18 @@
-use crate::{
-    wifi::{register_wifi_handlers, WifiManager},
-    *,
-};
+use crate::wifi::{register_wifi_handlers, WifiManager};
+use crate::*;
 use anyhow::{Context, Result};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io::Read;
-use esp_hal::{
-    delay::Delay,
-    gpio::{Input, InputConfig, Level, Output, OutputConfig},
-    peripherals::Peripherals,
-    time::Rate,
-    timer::timg::TimerGroup,
-    uart::Uart,
-};
+use esp_hal::delay::Delay;
+use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig};
+use esp_hal::peripherals::Peripherals;
+use esp_hal::time::Rate;
+use esp_hal::timer::timg::TimerGroup;
+use esp_hal::uart::Uart;
 use esp_println::println;
 use esp_storage::FlashStorage;
-use firefly_types::{spi::*, Encode};
+use firefly_types::spi::*;
+use firefly_types::Encode;
 
 pub fn run_v3(peripherals: Peripherals) -> Result<()> {
     // Send hardware reset on the display.

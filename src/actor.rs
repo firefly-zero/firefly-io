@@ -1,20 +1,20 @@
-use crate::{retries, wifi::WifiManager, ErrPrinter};
-use alloc::{boxed::Box, string::String};
+use crate::wifi::WifiManager;
+use crate::{retries, ErrPrinter};
+use alloc::boxed::Box;
+use alloc::string::String;
 use anyhow::{bail, Result};
 use cirque_pinnacle::{Absolute, Touchpad};
 use core::convert::Infallible;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_storage::Storage;
-use esp_bootloader_esp_idf::{
-    ota::Ota,
-    partitions::{read_partition_table, AppPartitionSubType, DataPartitionSubType, PartitionType},
+use esp_bootloader_esp_idf::ota::Ota;
+use esp_bootloader_esp_idf::partitions::{
+    read_partition_table, AppPartitionSubType, DataPartitionSubType, PartitionType,
 };
-use esp_hal::{
-    delay::Delay,
-    gpio::{Input, Output},
-    spi::master::Spi,
-    Blocking,
-};
+use esp_hal::delay::Delay;
+use esp_hal::gpio::{Input, Output};
+use esp_hal::spi::master::Spi;
+use esp_hal::Blocking;
 use esp_println::println;
 use esp_radio::esp_now::*;
 use esp_storage::FlashStorage;
